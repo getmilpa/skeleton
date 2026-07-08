@@ -1,0 +1,70 @@
+name: CI
+
+# Proves the create-project template actually BOOTS end to end — not just that it type-checks.
+# The load-bearing steps are `coa doctor` exiting 0, a live `php -S` + `curl /` returning 200,
+# and the PHPUnit boot smoke test. There is deliberately no docs job: milpa/skeleton is an app
+# template, not a library, so it ships no generated API docs.
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  boot:
+    name: Boot proof (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.3', '8.4']
+    continue-on-error: ${{ matrix.php == '8.4' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+
+      - name: Validate composer.json
+        run: composer validate --strict
+
+      # Once milpa/skeleton is published, the milpa/* dependencies resolve from Packagist; the
+      # composer.json `path` repositories (sibling packages in the framework monorepo) are simply
+      # ignored when those directories are absent, as they are on a standalone checkout.
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: PHP syntax (php -l)
+        run: |
+          find src public config tests -name '*.php' -print0 | xargs -0 -n1 php -l >/dev/null
+          php -l bin/coa >/dev/null
+
+      - name: Code style (family standard, php-cs-fixer dry-run)
+        env:
+          PHP_CS_FIXER_IGNORE_ENV: 1
+        run: vendor/bin/php-cs-fixer fix --dry-run --diff
+
+      - name: coa doctor boots the kernel (must exit 0)
+        run: php bin/coa doctor
+
+      - name: Serve with php -S and prove GET / == 200
+        run: |
+          php -S 127.0.0.1:8000 -t public >/tmp/php-server.log 2>&1 &
+          SERVER_PID=$!
+          for _ in $(seq 1 40); do
+            if curl -sf -o /dev/null http://127.0.0.1:8000/; then break; fi
+            sleep 0.25
+          done
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/)
+          kill "$SERVER_PID" 2>/dev/null || true
+          echo "GET / -> $STATUS"
+          test "$STATUS" = "200"
+
+      - name: PHPUnit (boot smoke test)
+        run: vendor/bin/phpunit
