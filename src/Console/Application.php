@@ -20,11 +20,15 @@ use Milpa\Exceptions\AttributeNotFoundException;
 use Milpa\Exceptions\Plugin\PluginDependencyException;
 use Milpa\Http\HttpMethod;
 use Milpa\Interfaces\Plugin\PluginInterface;
+use Milpa\Runtime\CommandDefinition;
+use Milpa\Runtime\CommandProviderInterface;
 use Milpa\Runtime\Config;
 use Milpa\Runtime\Http\RouteProviderInterface;
 use Milpa\Runtime\Kernel;
 use Milpa\Runtime\Support\RootNotFoundException;
 use Milpa\Services\CapabilityGraphChecker;
+use Milpa\ToolRuntime\ToolRegistry;
+use Psr\Log\NullLogger;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 
 /**
@@ -81,6 +85,20 @@ use Symfony\Component\DependencyInjection\ContainerBuilder;
  * a good fit for the legacy host's plugin-directory discovery model, but this skeleton's plugin
  * list is a config array, not a manifest directory (see `config/plugins.php`). `validate` below
  * therefore reaches for `milpa/core`'s `CapabilityGraphChecker` directly instead.
+ *
+ * **Discovered commands (skeleton 0.5, runtime 0.2's `CommandProviderInterface` — the first brick
+ * of Command-as-atom, see `docs/library/vision-milpa-commands.md`).** Any argv that does not match
+ * a built-in above falls through to {@see self::runDiscoveredCommand()}: it boots the real kernel
+ * and looks the name up in {@see Kernel::commands()} — the list every booted
+ * `CommandProviderInterface` plugin contributed via its `commands()` method. A plugin can
+ * therefore add its own `coa <name>` subcommand with zero edits to this file. `inspect:commands`
+ * lists both the built-ins and every discovered command (name, description, source plugin).
+ * {@see self::bootKernelForInspect()} also now wires a fresh {@see ToolRegistry} into every
+ * `inspect:*`/discovered-command boot by default (friction #2,
+ * `docs/superpowers/specs/2026-07-09-frictions-command-discovery.md`) — cheap and side-effect-free,
+ * so `inspect:tools` sees whatever a booted `ToolProviderInterface` plugin actually registered
+ * instead of always reporting "no tool registry". `bin/mcp-server.php` (new) exposes that same
+ * registry shape over MCP stdio via `milpa/mcp-server`'s `JsonRpcService` — no per-app copy needed.
  */
 final class Application
 {
@@ -107,7 +125,8 @@ final class Application
             'inspect:routes' => $this->inspectRoutes(),
             'inspect:services' => $this->inspectServices(),
             'inspect:tools' => $this->inspectTools(),
-            default => $this->help(),
+            'inspect:commands' => $this->inspectCommands(),
+            default => $this->runDiscoveredCommand($command, $args),
         };
     }
 
@@ -429,10 +448,18 @@ final class Application
     }
 
     /**
-     * Boots the REAL kernel exactly like doctor() does, for the 4 inspect:* commands below — kept
-     * as its own helper (rather than reusing doctor()'s inline code) so doctor()'s own output stays
-     * byte-for-byte unchanged. Prints the same "✗ ..." diagnostics doctor() would and returns null
-     * on any failure, so every inspect:* command fails the same way doctor() does on a broken app.
+     * Boots the REAL kernel exactly like doctor() does, for the inspect:* commands and discovered
+     * commands below — kept as its own helper (rather than reusing doctor()'s inline code) so
+     * doctor()'s own output stays byte-for-byte unchanged. Prints the same "✗ ..." diagnostics
+     * doctor() would and returns null on any failure, so every caller fails the same way doctor()
+     * does on a broken app.
+     *
+     * Unlike doctor(), this ALWAYS wires a fresh {@see ToolRegistry} into `Kernel::boot()`
+     * (friction #2, `docs/superpowers/specs/2026-07-09-frictions-command-discovery.md`): the
+     * greenhouse found `inspect:tools` permanently blind because nothing ever passed a
+     * `toolRegistry`, even when a booted `ToolProviderInterface` plugin had tools to register. A
+     * registry with nothing registered is cheap and side-effect-free, so this is safe to do
+     * unconditionally rather than only when some plugin "needs" one.
      */
     private function bootKernelForInspect(): ?Kernel
     {
@@ -444,7 +471,12 @@ final class Application
         $config = $this->loadConfig();
 
         try {
-            return Kernel::boot(['root' => $this->root, 'plugins' => $plugins, 'config' => $config]);
+            return Kernel::boot([
+                'root' => $this->root,
+                'plugins' => $plugins,
+                'config' => $config,
+                'toolRegistry' => new ToolRegistry(new NullLogger()),
+            ]);
         } catch (AttributeNotFoundException|PluginDependencyException|RootNotFoundException $e) {
             $this->line('✗ boot failed: ' . $e->getMessage());
 
@@ -621,12 +653,13 @@ final class Application
      * `inspect:tools` — every `#[Tool]` registered on the kernel's tool registry, via the concrete
      * registry's `getToolSummaries()`. `Kernel::toolRegistry()` is typed against
      * `Milpa\Interfaces\Tooling\ToolRegistryInterface` (core), whose contract has NO
-     * summary-listing method of its own (`register()` only) — `getToolSummaries()` exists solely on
-     * the concrete `Milpa\ToolRuntime\ToolRegistry`, so this duck-types via reflection rather than
-     * calling it directly (which would require a hard, unavailable-here dependency on
-     * `milpa/tool-runtime` just to type-check). This skeleton never passes a `toolRegistry` to
-     * `Kernel::boot()` (no plugin needs one, and `milpa/tool-runtime` is not one of its
-     * dependencies), so the common case below is the clean "no tools" message.
+     * summary-listing method of its own (`register()` only) — `getToolSummaries()` exists solely
+     * on the concrete `Milpa\ToolRuntime\ToolRegistry`, so this narrows with `instanceof` rather
+     * than reflecting. That narrowing is a plain type-check (not a duck-typing workaround) now
+     * that `milpa/tool-runtime` is a direct dependency of this skeleton (added alongside
+     * `milpa/mcp-server` — see composer.json), and {@see self::bootKernelForInspect()} always wires
+     * one in (friction #2 fix), so the `null`/wrong-type branches below are defensive only — they
+     * can't happen via this class's own boot path, only if a future edit stops wiring a registry.
      */
     private function inspectTools(): int
     {
@@ -639,31 +672,13 @@ final class Application
         $this->line('');
 
         $registry = $kernel->toolRegistry();
-        if ($registry === null) {
-            $this->line(
-                'no tools / no tool registry — this app never passes a toolRegistry to '
-                . 'Kernel::boot() (no configured plugin needs one, and this skeleton does not '
-                . 'depend on milpa/tool-runtime). Wire one via Kernel::boot([\'toolRegistry\' => '
-                . '...]) — e.g. Milpa\\ToolRuntime\\ToolRegistry — to expose #[Tool]s here.',
-            );
+        if (!$registry instanceof ToolRegistry) {
+            $this->line('no tools / no tool registry.');
 
             return 0;
         }
 
-        if (!method_exists($registry, 'getToolSummaries')) {
-            $this->line(
-                '✗ a Milpa\\Interfaces\\Tooling\\ToolRegistryInterface is wired (' . $registry::class
-                . ') but that contract declares no summary-listing method — only the concrete '
-                . 'Milpa\\ToolRuntime\\ToolRegistry happens to expose getToolSummaries(). See report.',
-            );
-
-            return 1;
-        }
-
-        /** @var mixed $summariesRaw */
-        $summariesRaw = (new \ReflectionMethod($registry, 'getToolSummaries'))->invoke($registry);
-        $summaries = is_array($summariesRaw) ? $summariesRaw : [];
-
+        $summaries = $registry->getToolSummaries();
         if ($summaries === []) {
             $this->line('(no tools registered)');
 
@@ -671,17 +686,176 @@ final class Application
         }
 
         foreach ($summaries as $tool) {
-            if (!is_array($tool)) {
-                continue;
-            }
-            $name = isset($tool['name']) ? (string) $tool['name'] : '(unnamed)';
-            $description = isset($tool['description']) ? (string) $tool['description'] : '';
+            $name = $tool['name'];
+            $description = $tool['description'];
             $this->line(\sprintf('  %-30s %s', $name, $description));
         }
         $this->line('');
         $this->line(\count($summaries) . ' tool(s) registered.');
 
         return 0;
+    }
+
+    /**
+     * `inspect:commands` (new, skeleton 0.5) — every command this `coa` can run: the built-ins
+     * matched directly in {@see run()}'s `match`, plus every command a booted
+     * `CommandProviderInterface` plugin contributed via `commands()`. The discovered half is
+     * reconstructed the same way {@see self::inspectRoutes()} reconstructs the route table (walk
+     * booted plugins, filter by interface, re-call the declaration method) rather than reading
+     * {@see Kernel::commands()} directly, because that flat list carries no per-command source
+     * plugin — walking plugins here is what recovers it.
+     */
+    private function inspectCommands(): int
+    {
+        $kernel = $this->bootKernelForInspect();
+        if ($kernel === null) {
+            return 1;
+        }
+
+        $this->line('milpa · coa inspect:commands');
+        $this->line('');
+        $this->line('Built-in:');
+        foreach ($this->builtInCommands() as $name => $description) {
+            $this->line(\sprintf('  %-20s %-48s [built-in]', $name, $description));
+        }
+
+        $booted = $kernel->bootedPluginNames();
+        /** @var list<array{0: string, 1: string, 2: string}> $discovered */
+        $discovered = [];
+        foreach ($kernel->plugins() as $plugin) {
+            if (!$plugin instanceof CommandProviderInterface) {
+                continue;
+            }
+            $meta = $this->pluginMetadata($plugin);
+            if (!\in_array($meta->name, $booted, true)) {
+                continue;
+            }
+            foreach ($plugin->commands() as $command) {
+                $discovered[] = [$command->name, $command->description, $meta->name];
+            }
+        }
+
+        $this->line('');
+        $this->line('Discovered (from plugins):');
+        if ($discovered === []) {
+            $this->line('  (none)');
+        } else {
+            foreach ($discovered as [$name, $description, $pluginName]) {
+                $this->line(\sprintf('  %-20s %-48s [%s]', $name, $description, $pluginName));
+            }
+        }
+
+        $this->line('');
+        $this->line(\sprintf(
+            '%d built-in, %d discovered command(s).',
+            \count($this->builtInCommands()),
+            \count($discovered),
+        ));
+
+        return 0;
+    }
+
+    /**
+     * `coa <name>` for any `<name>` that matched none of {@see run()}'s built-in `match` arms:
+     * boots the real kernel, looks `<name>` up in {@see Kernel::commands()} — the flat list every
+     * booted `CommandProviderInterface` plugin contributed — and invokes its handler via
+     * {@see self::invokeCommand()} when found. Falls back to {@see self::help()} otherwise, exactly
+     * like the old hardcoded `default => $this->help()` did for any unrecognized command.
+     *
+     * @param list<string> $args
+     */
+    private function runDiscoveredCommand(string $command, array $args): int
+    {
+        $kernel = $this->bootKernelForInspect();
+        if ($kernel === null) {
+            return 1;
+        }
+
+        foreach ($kernel->commands() as $definition) {
+            if ($definition->name === $command) {
+                return $this->invokeCommand($definition, $args, $kernel);
+            }
+        }
+
+        return $this->help();
+    }
+
+    /**
+     * Invokes a discovered {@see CommandDefinition}'s handler. Per its docblock, `$handler` is
+     * either a plain PHP callable (the declaring plugin already closed over its own dependencies)
+     * or a `[class-string, method]` pair — mirroring `milpa/http`'s `HandlerReference` for routes
+     * — which this resolves through the booted kernel's DI container before calling, exactly like
+     * {@see \Milpa\Runtime\Http\ContainerHandlerResolver} does for a route's handler.
+     *
+     * `is_callable()` is checked FIRST, before the container branch: a genuine PHP callable can
+     * itself be shaped as an array (`[$object, 'method']`, `['ClassName', 'staticMethod']`), which
+     * would otherwise be ambiguous with the `[class-string, method]`-for-the-container shape.
+     * Checking `is_callable()` first resolves the ambiguity — anything already directly callable
+     * is called as-is; only a `[class-string, method]` pair that ISN'T already callable (the
+     * ordinary case: a non-static method with no bound instance) falls to container resolution —
+     * per {@see CommandDefinition}'s own docblock, that is the only other shape `$handler` takes.
+     *
+     * The handler receives the remaining argv parsed into a `--flag=value` option bag — the exact
+     * shape {@see self::parseOptions()} already produces for every `make:*` command. Its return
+     * value decides what happens next: an `int` becomes the process exit code; a `string` is
+     * printed as-is; anything else non-null is JSON-encoded and printed; `null` prints nothing.
+     * Every case still exits `0` unless the handler explicitly returned an `int`.
+     *
+     * @param list<string> $args
+     */
+    private function invokeCommand(CommandDefinition $definition, array $args, Kernel $kernel): int
+    {
+        $handler = $definition->handler;
+        $options = $this->parseOptions($args);
+
+        if (\is_callable($handler)) {
+            /** @var mixed $result */
+            $result = $handler($options);
+        } else {
+            [$class, $method] = $handler;
+            $instance = $kernel->container()->get($class);
+            if (!\is_object($instance)) {
+                $this->line("✗ command '{$definition->name}': {$class} did not resolve to an object.");
+
+                return 1;
+            }
+            /** @var mixed $result */
+            $result = $instance->{$method}($options);
+        }
+
+        if (\is_int($result)) {
+            return $result;
+        }
+        if ($result !== null) {
+            $this->line(\is_string($result) ? $result : (string) \json_encode($result));
+        }
+
+        return 0;
+    }
+
+    /**
+     * @return array<string, string> command name => one-line description, for `inspect:commands`'
+     *                               "Built-in:" section. A separate literal from {@see self::help()}'s
+     *                               free-text output (not derived from it) so a future edit to one
+     *                               doesn't silently desync the other.
+     */
+    private function builtInCommands(): array
+    {
+        return [
+            'doctor' => 'boot the kernel, report what came up',
+            'validate' => 'static pre-boot capability check (no boot())',
+            'make:controller' => 'scaffold a booting PSR-7 controller + route',
+            'make:entity' => 'scaffold a persisting entity + FileRepository',
+            'make:plugin' => 'scaffold a standalone plugin (composition unit)',
+            'make:service' => 'scaffold a domain service, DI-registered in boot()',
+            'make:tool' => 'scaffold a #[Tool]-attributed AI tool method',
+            'make:crud' => 'scaffold entity + REST controller + routes + plugin',
+            'inspect:plugins' => 'list booted plugins + their capability graph',
+            'inspect:routes' => 'list the booted route table (method, path, handler)',
+            'inspect:services' => 'list what the DI container has registered',
+            'inspect:tools' => 'list registered #[Tool]s (or "no tool registry")',
+            'inspect:commands' => 'list built-in + plugin-discovered coa commands',
+        ];
     }
 
     private function help(): int
@@ -700,6 +874,7 @@ final class Application
         $this->line('  coa inspect:routes                             list the booted route table (method, path, handler)');
         $this->line('  coa inspect:services                           list what the DI container has registered');
         $this->line('  coa inspect:tools                              list registered #[Tool]s (or "no tool registry")');
+        $this->line('  coa inspect:commands                           list built-in + plugin-discovered coa commands');
         $this->line('');
         $this->line('  opts for make:controller: --path=/route  --flavor=runtime|legacy  --force');
         $this->line('  opts for make:entity:     --fields="name:type[:mods],..."  --table=name  --flavor=runtime|legacy  --force');
@@ -707,6 +882,9 @@ final class Application
         $this->line('  opts for make:service:    --interface  --flavor=runtime|legacy  --force');
         $this->line('  opts for make:tool:       --description=text  --tool-name=snake_name  --flavor=runtime|legacy  --force');
         $this->line('  opts for make:crud:       --fields="name:type[:mods],..."  --table=name  --flavor=runtime|legacy  --force');
+        $this->line('');
+        $this->line('  Any other <name> is looked up in the discovered command table (a booted');
+        $this->line('  CommandProviderInterface plugin\'s commands()) and run if found — see `coa inspect:commands`.');
 
         return 0;
     }

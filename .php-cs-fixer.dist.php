@@ -11,7 +11,7 @@ use PhpCsFixer\Finder;
 
 $finder = Finder::create()
     ->in(array_filter(['src', 'public', 'config', 'tests'], 'is_dir'))
-    ->append(['bin/coa'])
+    ->append(['bin/coa', 'bin/mcp-server.php'])
     ->exclude(['vendor']);
 
 return (new Config())

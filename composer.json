@@ -1,18 +1,20 @@
 {
   "name": "milpa/skeleton",
-  "description": "The composer create-project starting point for a Milpa app: boots milpa/runtime's Kernel, serves a real HTTP response with zero database, and ships a minimal coa CLI (doctor/validate/make) wired to milpa/devtools.",
+  "description": "The composer create-project starting point for a Milpa app: boots milpa/runtime's Kernel, serves a real HTTP response with zero database, ships a coa CLI (doctor/validate/make/inspect, plus every plugin-declared CommandProviderInterface command) wired to milpa/devtools, and exposes a generic bin/mcp-server.php over stdio via milpa/mcp-server.",
   "type": "project",
   "license": "Apache-2.0",
   "require": {
     "php": ">=8.3",
-    "milpa/runtime": "^0.1",
+    "milpa/runtime": "^0.2",
     "milpa/core": "^0.5",
     "milpa/container": "^0.1",
     "milpa/events": "^0.2",
     "milpa/http": "^0.1",
     "milpa/plugin": "^0.1",
     "milpa/data": "^0.1",
-    "milpa/devtools": "^0.4",
+    "milpa/devtools": "^0.5",
+    "milpa/tool-runtime": "^0.5",
+    "milpa/mcp-server": "^0.3",
     "nyholm/psr7": "^1.8",
     "nyholm/psr7-server": "^1.1"
   },
