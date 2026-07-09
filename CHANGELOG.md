@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.1](https://github.com/getmilpa/skeleton/compare/v0.5.0...v0.5.1) (2026-07-09)
+
+
+### Features
+
+* agent-ready is opt-in — the stock app is minimal ([568b0fb](https://github.com/getmilpa/skeleton/commit/568b0fb1df328f7e416b07ac423ab14f707ce1ac))
+
+
+### Miscellaneous Chores
+
+* release 0.5.1 ([c622bab](https://github.com/getmilpa/skeleton/commit/c622babd945d07364aba45bb752f56ecfd53936a))
+
 ## [0.5.0](https://github.com/getmilpa/skeleton/compare/v0.4.0...v0.5.0) (2026-07-09)
 
 
