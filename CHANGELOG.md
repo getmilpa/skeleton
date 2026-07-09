@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.0](https://github.com/getmilpa/skeleton/compare/v0.4.0...v0.5.0) (2026-07-09)
+
+
+### Features
+
+* discovered commands + inspect:commands + a generic MCP server ([629138e](https://github.com/getmilpa/skeleton/commit/629138e6223144778cbaaaeae3f1d3bc1dcfa545))
+
+
+### Miscellaneous Chores
+
+* release 0.5.0 ([05ff98a](https://github.com/getmilpa/skeleton/commit/05ff98aaed0c45b6ff7485ae5fa70ce104c484d2))
+
 ## [0.4.0](https://github.com/getmilpa/skeleton/compare/v0.4.0...v0.4.0) (2026-07-09)
 
 
