@@ -120,16 +120,20 @@ for an agent driving the CLI, not just a human:
 ```bash
 php bin/coa doctor                                        # boot the kernel, report what came up
 php bin/coa validate                                      # static capability check, no boot()
-php bin/coa make:controller HelloPlugin GreetingController --methods=index
+php bin/coa make:controller PingPlugin PingController --path=/ping
 ```
 
 `make:controller` is real `milpa/devtools` machinery (`Milpa\DevTools\Make\Generators\ControllerGenerator`
-+ `WriteGuard`) — but its output targets the *legacy* Milpa host convention devtools was built
-for (`Milpa\Plugins\*\Controllers`, extends `Milpa\app\Providers\BaseController`), not this
-skeleton's `App\Plugins\*` + `RouteProviderInterface` pattern. The command prints that mismatch
-after writing the file; treat the generated code as a reference and adapt the namespace,
-base class, and route wiring by hand. See this front's SDD report for the full context — closing
-that gap with a runtime-native generator is a natural next step for `milpa/devtools`.
++ `WriteGuard`), and it scaffolds code that **boots in this skeleton unchanged**. devtools
+auto-detects the convention per app root (`Milpa\DevTools\Make\ConventionDetector`): this project
+has `config/plugins.php` and an `App\` PSR-4 root with no `milpa.json`, so it picks the **runtime**
+flavor with no flag and writes exactly this skeleton's `App\Plugins\*` + `RouteProviderInterface`
+pattern — a plain PSR-7 controller (`index(ServerRequestInterface): ResponseInterface`, no base
+class, no `#[Route]`) plus a minimal `RouteProviderInterface` plugin wiring `GET <path> →
+Controller::index`. The command then prints the one manual step it can't do deterministically:
+add the generated plugin's `::class` to `config/plugins.php`. Do that, reload, and the new route
+serves a real response. Pass `--flavor=legacy` to force the old `Milpa\Plugins\*` +
+`BaseController` host convention instead; `--path=/route` sets the route path.
 
 ## What this is NOT
 

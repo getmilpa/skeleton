@@ -31,12 +31,17 @@ use Milpa\Services\CapabilityGraphChecker;
  *   `Kernel::boot()` calls internally — over the *instantiated but unbooted* configured
  *   plugins. A static, side-effect-free pre-boot certification (`boot()` never runs).
  * - `make:controller` wires `milpa/devtools`' {@see ControllerGenerator} + {@see WriteGuard} to
- *   scaffold a controller file. Its output targets the LEGACY host convention documented in
- *   devtools' own README (`Milpa\Plugins\*\Controllers`, extends
- *   `Milpa\app\Providers\BaseController`) — not this skeleton's `App\Plugins\*` +
- *   {@see RouteProviderInterface} pattern. The command prints that mismatch explicitly rather
- *   than silently handing back a file that won't boot here (see the README's "Add a plugin"
- *   section and this front's SDD report).
+ *   scaffold a controller that BOOTS here. devtools auto-detects the convention per app root
+ *   ({@see \Milpa\DevTools\Make\ConventionDetector}): this skeleton is a `milpa/runtime` app
+ *   (`config/plugins.php`, `App\` PSR-4, no `milpa.json`), so it picks the RUNTIME flavor with no
+ *   flag — a plain PSR-7 controller (`index(ServerRequestInterface): ResponseInterface`, no
+ *   `BaseController`, no `#[Route]`), and because an orphaned controller boots nothing, ALSO a
+ *   minimal {@see RouteProviderInterface} plugin wiring `GET <path> → Controller::index` (or, if
+ *   that plugin area already exists, the exact route snippet to hand-add). Register the generated
+ *   plugin in `config/plugins.php` — the printed
+ *   {@see \Milpa\DevTools\Make\GenerationResult::$guidance} says exactly that — and it serves a
+ *   real response (proven by `php -S` + `curl`, and by this skeleton's own boot smoke test).
+ *   `--flavor=legacy` forces the old host convention; `--path=/route` sets the route.
  *
  * `milpa/devtools`' manifest-file-oriented Inspect layer (`CapabilityGraphValidator`,
  * `PluginManifestValidator`, `ProviderImplementsValidator`) expects `milpa.json` files on disk —
@@ -156,7 +161,7 @@ final class Application
     private function makeController(array $args): int
     {
         if (\count($args) < 2) {
-            $this->line('usage: coa make:controller <PluginName> <ControllerName> [--methods=index] [--route=/path] [--force]');
+            $this->line('usage: coa make:controller <PluginName> <ControllerName> [--path=/route] [--flavor=runtime|legacy] [--force]');
 
             return 1;
         }
@@ -165,6 +170,9 @@ final class Application
         $options = $this->parseOptions(\array_slice($args, 2));
         $force = isset($options['force']);
 
+        // devtools picks the convention for THIS root on its own: the skeleton has config/plugins.php
+        // and an App\ PSR-4 root with no milpa.json, so ConventionDetector selects the RUNTIME flavor
+        // — a plain PSR-7 controller plus a booting RouteProviderInterface plugin — with no --flavor.
         $context = new GenerationContext(plugin: $plugin, name: $name, options: $options, root: $this->root);
         $result = (new ControllerGenerator())->generate($context);
 
@@ -177,12 +185,19 @@ final class Application
             $this->line("✔ wrote {$file->path}");
         }
 
-        $this->line('');
-        $this->line('⚠ this file targets the LEGACY Milpa host convention (namespace Milpa\\Plugins\\...,');
-        $this->line('  extends Milpa\\app\\Providers\\BaseController) that milpa/devtools\' ControllerGenerator');
-        $this->line('  was built for — NOT this skeleton\'s App\\Plugins\\* + RouteProviderInterface pattern.');
-        $this->line('  Treat the output as a reference: adapt the namespace, drop the BaseController parent,');
-        $this->line('  and wire a Route with a HandlerReference by hand. See the README\'s "Add a plugin".');
+        // The generator hands back the one manual step it cannot do deterministically — registering a
+        // freshly generated plugin in config/plugins.php, or the route snippet to add to an existing
+        // one. Surface it verbatim instead of the old "won't boot here" warning: the code boots now.
+        //
+        // devtools' VerifyRunner/ControllerVerifier is intentionally NOT wired in here: its runtime
+        // path calls ReflectionClass::isSubclassOf('Milpa\app\Providers\BaseController'), which THROWS
+        // in a genuine milpa/runtime app because that legacy base class is (correctly) absent. Wiring
+        // it would crash every scaffold. The generated controller's shape is instead proven where it
+        // matters — by booting it (php -S + curl, and tests/Boot) — not by in-process reflection.
+        if ($result->guidance !== null) {
+            $this->line('');
+            $this->line($result->guidance);
+        }
 
         return 0;
     }
@@ -193,9 +208,9 @@ final class Application
         $this->line('');
         $this->line('  coa doctor                                    boot the kernel, report what came up');
         $this->line('  coa validate                                  static pre-boot capability check (no boot())');
-        $this->line('  coa make:controller <Plugin> <Name> [opts]     scaffold a controller via milpa/devtools');
+        $this->line('  coa make:controller <Plugin> <Name> [opts]     scaffold a booting PSR-7 controller + route');
         $this->line('');
-        $this->line('  opts for make:controller: --methods=index,show  --route=/path  --force');
+        $this->line('  opts for make:controller: --path=/route  --flavor=runtime|legacy  --force');
 
         return 0;
     }
