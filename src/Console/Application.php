@@ -4,26 +4,42 @@ declare(strict_types=1);
 
 namespace App\Console;
 
+use Milpa\Attributes\PluginMetadata;
 use Milpa\Container\DIContainer;
 use Milpa\DevTools\Make\GenerationContext;
+use Milpa\DevTools\Make\GenerationResult;
 use Milpa\DevTools\Make\Generators\ControllerGenerator;
+use Milpa\DevTools\Make\Generators\CrudGenerator;
 use Milpa\DevTools\Make\Generators\EntityGenerator;
+use Milpa\DevTools\Make\Generators\PluginGenerator;
+use Milpa\DevTools\Make\Generators\ServiceGenerator;
+use Milpa\DevTools\Make\Generators\ToolGenerator;
 use Milpa\DevTools\Make\VerifyRunner;
 use Milpa\DevTools\Make\WriteGuard;
 use Milpa\Exceptions\AttributeNotFoundException;
 use Milpa\Exceptions\Plugin\PluginDependencyException;
+use Milpa\Http\HttpMethod;
 use Milpa\Interfaces\Plugin\PluginInterface;
 use Milpa\Runtime\Config;
 use Milpa\Runtime\Http\RouteProviderInterface;
 use Milpa\Runtime\Kernel;
 use Milpa\Runtime\Support\RootNotFoundException;
 use Milpa\Services\CapabilityGraphChecker;
+use Symfony\Component\DependencyInjection\ContainerBuilder;
 
 /**
- * The skeleton's minimal `coa` CLI: four subcommands wired directly to `milpa/runtime`'s
- * {@see Kernel} and `milpa/devtools`' generate/inspect layers. No Symfony Console, no command
- * bus — just enough `argv` dispatch to prove the wiring and stay genuinely useful in a
- * zero-database app.
+ * The skeleton's minimal `coa` CLI: subcommands wired directly to `milpa/runtime`'s {@see Kernel}
+ * and `milpa/devtools`' generate/inspect layers. No Symfony Console, no command bus — just enough
+ * `argv` dispatch to prove the wiring and stay genuinely useful in a zero-database app.
+ *
+ * Beyond `doctor`/`validate`/`make:controller`/`make:entity` (documented below), 8 more commands
+ * plug into the exact same Make engine and a freshly-booted {@see Kernel}: `make:plugin`,
+ * `make:service`, `make:tool`, `make:crud` ({@see \Milpa\DevTools\Make\Generators\PluginGenerator}/
+ * {@see \Milpa\DevTools\Make\Generators\ServiceGenerator}/{@see \Milpa\DevTools\Make\Generators\ToolGenerator}/
+ * {@see \Milpa\DevTools\Make\Generators\CrudGenerator}, via {@see self::writeAndReport()}) and
+ * `inspect:plugins`/`inspect:routes`/`inspect:services`/`inspect:tools` — each boots the real
+ * kernel via {@see self::bootKernelForInspect()} and reports what it finds, never fabricated data.
+ * See `coa` with no arguments ({@see self::help()}) for the full command list.
  *
  * - `doctor`          boots the REAL kernel ({@see Kernel::boot()}) with `config/plugins.php`
  *   and the `config/app.php` config bag, then reports what actually came up: root, collaborators,
@@ -83,6 +99,14 @@ final class Application
             'validate' => $this->validate(),
             'make:controller' => $this->makeController($args),
             'make:entity' => $this->makeEntity($args),
+            'make:plugin' => $this->makePlugin($args),
+            'make:service' => $this->makeService($args),
+            'make:tool' => $this->makeTool($args),
+            'make:crud' => $this->makeCrud($args),
+            'inspect:plugins' => $this->inspectPlugins(),
+            'inspect:routes' => $this->inspectRoutes(),
+            'inspect:services' => $this->inspectServices(),
+            'inspect:tools' => $this->inspectTools(),
             default => $this->help(),
         };
     }
@@ -274,6 +298,392 @@ final class Application
         return 0;
     }
 
+    /**
+     * @param list<string> $args
+     */
+    private function makePlugin(array $args): int
+    {
+        if (\count($args) < 1) {
+            $this->line('usage: coa make:plugin <Name> [--provides=cap1,cap2] [--requires=cap3] [--flavor=runtime|legacy] [--force]');
+
+            return 1;
+        }
+
+        [$name] = $args;
+        $options = $this->parseOptions(\array_slice($args, 1));
+        $force = isset($options['force']);
+
+        // make:plugin has a single positional argument — the plugin IS the artifact being
+        // generated, so the same value is passed for both GenerationContext::$plugin and $name;
+        // PluginGenerator never reads $plugin (see the F1a report's design note on this).
+        $context = new GenerationContext(plugin: $name, name: $name, options: $options, root: $this->root);
+        $result = (new PluginGenerator())->generate($context);
+
+        return $this->writeAndReport($result, $force);
+    }
+
+    /**
+     * @param list<string> $args
+     */
+    private function makeService(array $args): int
+    {
+        if (\count($args) < 2) {
+            $this->line('usage: coa make:service <Plugin> <Name> [--interface] [--flavor=runtime|legacy] [--force]');
+
+            return 1;
+        }
+
+        [$plugin, $name] = $args;
+        $options = $this->parseOptions(\array_slice($args, 2));
+        $force = isset($options['force']);
+
+        $context = new GenerationContext(plugin: $plugin, name: $name, options: $options, root: $this->root);
+        $result = (new ServiceGenerator())->generate($context);
+
+        return $this->writeAndReport($result, $force);
+    }
+
+    /**
+     * @param list<string> $args
+     */
+    private function makeTool(array $args): int
+    {
+        if (\count($args) < 2) {
+            $this->line('usage: coa make:tool <Plugin> <Name> [--description=text] [--tool-name=snake_name] [--flavor=runtime|legacy] [--force]');
+
+            return 1;
+        }
+
+        [$plugin, $name] = $args;
+        $options = $this->parseOptions(\array_slice($args, 2));
+        $force = isset($options['force']);
+
+        $context = new GenerationContext(plugin: $plugin, name: $name, options: $options, root: $this->root);
+        $result = (new ToolGenerator())->generate($context);
+
+        // ToolGenerator::generate() always returns verifyKind: null — no ToolVerifier exists yet
+        // (see the F1a/F1b reports' Fricciones) — writeAndReport() skips VerifyRunner cleanly.
+        return $this->writeAndReport($result, $force);
+    }
+
+    /**
+     * @param list<string> $args
+     */
+    private function makeCrud(array $args): int
+    {
+        if (\count($args) < 2) {
+            $this->line('usage: coa make:crud <Plugin> <Entity> [--fields="name:type[:mods],..."] [--table=name] [--flavor=runtime|legacy] [--force]');
+
+            return 1;
+        }
+
+        [$plugin, $name] = $args;
+        $options = $this->parseOptions(\array_slice($args, 2));
+        $force = isset($options['force']);
+
+        $context = new GenerationContext(plugin: $plugin, name: $name, options: $options, root: $this->root);
+        $result = (new CrudGenerator())->generate($context);
+
+        // Unlike make:tool, CrudGenerator DOES set verifyKind ('controller', pointed at the
+        // generated {Entity}Controller — see its class docblock's Fricciones #1). writeAndReport()
+        // therefore runs VerifyRunner for it, same as make:entity does today. This is safe (unlike
+        // make:controller's own deliberate VerifyRunner skip): ControllerVerifier::verifyRuntime()
+        // only touches the legacy BaseController check behind a class_exists() short-circuit — it
+        // never throws when that legacy class is absent, so nothing here re-triggers the landmine
+        // makeController()'s docblock warns about.
+        return $this->writeAndReport($result, $force);
+    }
+
+    /**
+     * Shared write + guidance + optional-verify tail for the 4 newer make:* commands (plugin/
+     * service/tool/crud) — the same three steps makeController()/makeEntity() already run inline.
+     * Kept as a private helper here (not retrofitted onto those two) to avoid touching their
+     * proven, already-shipped bodies for this change.
+     */
+    private function writeAndReport(GenerationResult $result, bool $force): int
+    {
+        $guard = new WriteGuard();
+        foreach ($result->files as $file) {
+            $guard->assertWritable($file->path, $force);
+        }
+        foreach ($result->files as $file) {
+            $guard->write($file->path, $file->contents);
+            $this->line("✔ wrote {$file->path}");
+        }
+
+        if ($result->guidance !== null) {
+            $this->line('');
+            $this->line($result->guidance);
+        }
+
+        if ($result->verifyKind !== null && $result->verifyTarget !== null) {
+            $verify = (new VerifyRunner())->run($result->verifyKind, $result->verifyTarget, $this->root, $result->flavor);
+            $this->line('');
+            $this->line($verify['output']);
+            if (!$verify['ok']) {
+                return 1;
+            }
+        }
+
+        return 0;
+    }
+
+    /**
+     * Boots the REAL kernel exactly like doctor() does, for the 4 inspect:* commands below — kept
+     * as its own helper (rather than reusing doctor()'s inline code) so doctor()'s own output stays
+     * byte-for-byte unchanged. Prints the same "✗ ..." diagnostics doctor() would and returns null
+     * on any failure, so every inspect:* command fails the same way doctor() does on a broken app.
+     */
+    private function bootKernelForInspect(): ?Kernel
+    {
+        $plugins = $this->loadPluginList();
+        if ($plugins === null) {
+            return null;
+        }
+
+        $config = $this->loadConfig();
+
+        try {
+            return Kernel::boot(['root' => $this->root, 'plugins' => $plugins, 'config' => $config]);
+        } catch (AttributeNotFoundException|PluginDependencyException|RootNotFoundException $e) {
+            $this->line('✗ boot failed: ' . $e->getMessage());
+
+            return null;
+        }
+    }
+
+    /**
+     * Reflects `#[PluginMetadata]` off a booted plugin instance — mirrors `Milpa\Runtime\Kernel`'s
+     * own private `metadataOf()` exactly. Safe to assume it never throws in practice here: every
+     * plugin reaching `Kernel::plugins()` already survived `Kernel::boot()`'s own identical check.
+     */
+    private function pluginMetadata(object $plugin): PluginMetadata
+    {
+        $attributes = (new \ReflectionClass($plugin))->getAttributes(PluginMetadata::class);
+        if ($attributes === []) {
+            throw new AttributeNotFoundException($plugin::class . ' has no #[PluginMetadata] attribute.');
+        }
+
+        return $attributes[0]->newInstance();
+    }
+
+    /**
+     * `inspect:plugins` — every configured plugin's identity + capability graph
+     * (provides -> requires -> suggests), read straight off its `#[PluginMetadata]`, plus whether
+     * it actually booted (`Kernel::bootedPluginNames()` — a plugin can be configured but vetoed by
+     * a `plugin.booting` listener without ever booting).
+     */
+    private function inspectPlugins(): int
+    {
+        $kernel = $this->bootKernelForInspect();
+        if ($kernel === null) {
+            return 1;
+        }
+
+        $this->line('milpa · coa inspect:plugins');
+        $this->line('');
+
+        $booted = $kernel->bootedPluginNames();
+        foreach ($kernel->plugins() as $plugin) {
+            $meta = $this->pluginMetadata($plugin);
+            $status = \in_array($meta->name, $booted, true)
+                ? 'booted'
+                : 'not booted (vetoed by a plugin.booting listener)';
+
+            $pluginClass = $plugin::class;
+            $this->line("• {$meta->name}  [{$status}]");
+            $this->line("    class:     {$pluginClass}");
+            $this->line("    type:      {$meta->type}");
+            $this->line("    version:   {$meta->version}");
+            $this->line('    provides:  ' . ($meta->provides === [] ? '(none)' : implode(', ', $meta->provides)));
+            $this->line('    requires:  ' . ($meta->requires === [] ? '(none)' : implode(', ', $meta->requires)));
+            $this->line('    suggests:  ' . ($meta->suggests === [] ? '(none)' : implode(', ', $meta->suggests)));
+            $this->line('');
+        }
+        $this->line(\sprintf('%d plugin(s) configured, %d booted.', \count($kernel->plugins()), \count($booted)));
+
+        return 0;
+    }
+
+    /**
+     * `inspect:routes` — the route table, reconstructed from every BOOTED `RouteProviderInterface`
+     * plugin's `routes()`. `Milpa\Http\Routing\Router` (what `Kernel::router()` returns) exposes no
+     * route-table accessor of its own — the same gap `doctor()` already works around by summing a
+     * count off this exact loop; see the REPORT for the precise missing primitive.
+     */
+    private function inspectRoutes(): int
+    {
+        $kernel = $this->bootKernelForInspect();
+        if ($kernel === null) {
+            return 1;
+        }
+
+        $this->line('milpa · coa inspect:routes');
+        $this->line('(reconstructed from booted RouteProviderInterface plugins — Milpa\\Http\\Routing\\Router');
+        $this->line(' exposes no route-table accessor of its own; see report)');
+        $this->line('');
+
+        $booted = $kernel->bootedPluginNames();
+        /** @var list<array{0: string, 1: string, 2: string, 3: string}> $rows */
+        $rows = [];
+        foreach ($kernel->plugins() as $plugin) {
+            if (!$plugin instanceof RouteProviderInterface) {
+                continue;
+            }
+            $meta = $this->pluginMetadata($plugin);
+            if (!\in_array($meta->name, $booted, true)) {
+                continue;
+            }
+            foreach ($plugin->routes() as $route) {
+                $methods = implode('|', array_map(static fn (HttpMethod $m): string => $m->value, $route->methods));
+                $handler = $route->handler !== null ? (string) $route->handler : '(unbound)';
+                $rows[] = [$methods, $route->path, $handler, $meta->name];
+            }
+        }
+
+        if ($rows === []) {
+            $this->line('(no routes declared)');
+
+            return 0;
+        }
+
+        foreach ($rows as [$methods, $path, $handler, $pluginName]) {
+            $this->line(\sprintf('  %-10s %-24s -> %-40s [%s]', $methods, $path, $handler, $pluginName));
+        }
+        $this->line('');
+        $this->line(\count($rows) . ' route(s).');
+
+        return 0;
+    }
+
+    /**
+     * `inspect:services` — every service id the DI container knows about, mapped to the class of
+     * the instance it resolves to. `Milpa\Interfaces\Di\DIContainerInterface` declares no
+     * enumeration method (`getContainer()` returns a plain PSR-11 `ContainerInterface`, which only
+     * guarantees `get()`/`has()`), so this reaches past the interface into the concrete
+     * `Symfony\Component\DependencyInjection\ContainerBuilder` that `Milpa\Container\DIContainer`
+     * always builds internally — the best available primitive, and exactly the gap the REPORT flags.
+     */
+    private function inspectServices(): int
+    {
+        $kernel = $this->bootKernelForInspect();
+        if ($kernel === null) {
+            return 1;
+        }
+
+        $this->line('milpa · coa inspect:services');
+        $this->line('');
+
+        $psrContainer = $kernel->container()->getContainer();
+        if (!$psrContainer instanceof ContainerBuilder) {
+            $this->line(
+                '✗ cannot enumerate: the underlying container is ' . $psrContainer::class . ', not '
+                . 'Symfony\\Component\\DependencyInjection\\ContainerBuilder — '
+                . 'Milpa\\Interfaces\\Di\\DIContainerInterface declares no service-id enumeration '
+                . 'method of its own. See report.',
+            );
+
+            return 1;
+        }
+
+        /** @var list<string> $ids */
+        $ids = array_values(array_filter(
+            $psrContainer->getServiceIds(),
+            static fn (string $id): bool => $id !== 'service_container',
+        ));
+        sort($ids);
+
+        if ($ids === []) {
+            $this->line('(no services registered)');
+
+            return 0;
+        }
+
+        foreach ($ids as $id) {
+            try {
+                // ContainerBuilder::get()'s default $invalidBehavior throws rather than returning
+                // null for a missing/unresolvable id — every id here came straight off the same
+                // container's own getServiceIds(), so this always resolves to a real object.
+                $instance = $psrContainer->get($id);
+                $impl = $instance::class;
+            } catch (\Throwable $e) {
+                $impl = '(unresolvable: ' . $e->getMessage() . ')';
+            }
+            $this->line(\sprintf('  %-70s -> %s', $id, $impl));
+        }
+        $this->line('');
+        $this->line(\count($ids) . ' service(s) registered.');
+
+        return 0;
+    }
+
+    /**
+     * `inspect:tools` — every `#[Tool]` registered on the kernel's tool registry, via the concrete
+     * registry's `getToolSummaries()`. `Kernel::toolRegistry()` is typed against
+     * `Milpa\Interfaces\Tooling\ToolRegistryInterface` (core), whose contract has NO
+     * summary-listing method of its own (`register()` only) — `getToolSummaries()` exists solely on
+     * the concrete `Milpa\ToolRuntime\ToolRegistry`, so this duck-types via reflection rather than
+     * calling it directly (which would require a hard, unavailable-here dependency on
+     * `milpa/tool-runtime` just to type-check). This skeleton never passes a `toolRegistry` to
+     * `Kernel::boot()` (no plugin needs one, and `milpa/tool-runtime` is not one of its
+     * dependencies), so the common case below is the clean "no tools" message.
+     */
+    private function inspectTools(): int
+    {
+        $kernel = $this->bootKernelForInspect();
+        if ($kernel === null) {
+            return 1;
+        }
+
+        $this->line('milpa · coa inspect:tools');
+        $this->line('');
+
+        $registry = $kernel->toolRegistry();
+        if ($registry === null) {
+            $this->line(
+                'no tools / no tool registry — this app never passes a toolRegistry to '
+                . 'Kernel::boot() (no configured plugin needs one, and this skeleton does not '
+                . 'depend on milpa/tool-runtime). Wire one via Kernel::boot([\'toolRegistry\' => '
+                . '...]) — e.g. Milpa\\ToolRuntime\\ToolRegistry — to expose #[Tool]s here.',
+            );
+
+            return 0;
+        }
+
+        if (!method_exists($registry, 'getToolSummaries')) {
+            $this->line(
+                '✗ a Milpa\\Interfaces\\Tooling\\ToolRegistryInterface is wired (' . $registry::class
+                . ') but that contract declares no summary-listing method — only the concrete '
+                . 'Milpa\\ToolRuntime\\ToolRegistry happens to expose getToolSummaries(). See report.',
+            );
+
+            return 1;
+        }
+
+        /** @var mixed $summariesRaw */
+        $summariesRaw = (new \ReflectionMethod($registry, 'getToolSummaries'))->invoke($registry);
+        $summaries = is_array($summariesRaw) ? $summariesRaw : [];
+
+        if ($summaries === []) {
+            $this->line('(no tools registered)');
+
+            return 0;
+        }
+
+        foreach ($summaries as $tool) {
+            if (!is_array($tool)) {
+                continue;
+            }
+            $name = isset($tool['name']) ? (string) $tool['name'] : '(unnamed)';
+            $description = isset($tool['description']) ? (string) $tool['description'] : '';
+            $this->line(\sprintf('  %-30s %s', $name, $description));
+        }
+        $this->line('');
+        $this->line(\count($summaries) . ' tool(s) registered.');
+
+        return 0;
+    }
+
     private function help(): int
     {
         $this->line('milpa · coa — the skeleton\'s minimal CLI');
@@ -282,9 +692,21 @@ final class Application
         $this->line('  coa validate                                  static pre-boot capability check (no boot())');
         $this->line('  coa make:controller <Plugin> <Name> [opts]     scaffold a booting PSR-7 controller + route');
         $this->line('  coa make:entity <Plugin> <Name> [opts]         scaffold a persisting entity + FileRepository');
+        $this->line('  coa make:plugin <Name> [opts]                  scaffold a standalone plugin (composition unit)');
+        $this->line('  coa make:service <Plugin> <Name> [opts]        scaffold a domain service, DI-registered in boot()');
+        $this->line('  coa make:tool <Plugin> <Name> [opts]           scaffold a #[Tool]-attributed AI tool method');
+        $this->line('  coa make:crud <Plugin> <Entity> [opts]         scaffold entity + REST controller + routes + plugin');
+        $this->line('  coa inspect:plugins                            list booted plugins + their capability graph');
+        $this->line('  coa inspect:routes                             list the booted route table (method, path, handler)');
+        $this->line('  coa inspect:services                           list what the DI container has registered');
+        $this->line('  coa inspect:tools                              list registered #[Tool]s (or "no tool registry")');
         $this->line('');
         $this->line('  opts for make:controller: --path=/route  --flavor=runtime|legacy  --force');
         $this->line('  opts for make:entity:     --fields="name:type[:mods],..."  --table=name  --flavor=runtime|legacy  --force');
+        $this->line('  opts for make:plugin:     --provides=cap1,cap2  --requires=cap3  --flavor=runtime|legacy  --force');
+        $this->line('  opts for make:service:    --interface  --flavor=runtime|legacy  --force');
+        $this->line('  opts for make:tool:       --description=text  --tool-name=snake_name  --flavor=runtime|legacy  --force');
+        $this->line('  opts for make:crud:       --fields="name:type[:mods],..."  --table=name  --flavor=runtime|legacy  --force');
 
         return 0;
     }

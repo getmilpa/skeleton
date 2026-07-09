@@ -12,7 +12,7 @@
     "milpa/http": "^0.1",
     "milpa/plugin": "^0.1",
     "milpa/data": "^0.1",
-    "milpa/devtools": "^0.3",
+    "milpa/devtools": "^0.4",
     "nyholm/psr7": "^1.8",
     "nyholm/psr7-server": "^1.1"
   },

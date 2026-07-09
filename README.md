@@ -54,7 +54,7 @@ root: /path/to/myapp
 | Path | What it is |
 |---|---|
 | `public/index.php` | The HTTP entry point: builds a PSR-7 request from globals, boots the kernel, dispatches through `Milpa\Runtime\Http\RequestHandler`, emits the response. |
-| `bin/coa` | The CLI entry point — `doctor`, `validate`, `make:controller`. See [`src/Console/Application.php`](src/Console/Application.php). |
+| `bin/coa` | The CLI entry point — `doctor`, `validate`, `make:controller`/`entity`/`plugin`/`service`/`tool`/`crud`, `inspect:plugins`/`routes`/`services`/`tools`. See [`src/Console/Application.php`](src/Console/Application.php). |
 | `config/plugins.php` | The active-plugins list — a plain `list<class-string>`. This is the *only* source of truth for what boots; no database, no filesystem discovery. |
 | `config/app.php` | The app-config bag. Registered by `Kernel::boot()` as `Milpa\Runtime\Config`; plugins read it in `boot()`. See [The Config idiom](#the-config-idiom). |
 | `src/Plugins/HelloPlugin/` | The example plugin: `#[PluginMetadata]`, no `provides`/`requires`, one `GET /` route, and the Config read that drives the homepage greeting. Copy its shape for your own plugins. |
@@ -121,6 +121,15 @@ for an agent driving the CLI, not just a human:
 php bin/coa doctor                                        # boot the kernel, report what came up
 php bin/coa validate                                      # static capability check, no boot()
 php bin/coa make:controller PingPlugin PingController --path=/ping
+php bin/coa make:entity BoardPlugin Task --fields="title:string:200,done:bool"
+php bin/coa make:plugin BoardPlugin --provides=board.capability
+php bin/coa make:service BoardPlugin WorkflowService --interface
+php bin/coa make:tool BoardPlugin CompleteTaskTool --description="Mark a task done"
+php bin/coa make:crud BoardPlugin Task --fields="title:string:200,status:string:20"
+php bin/coa inspect:plugins                               # booted plugins + their capability graph
+php bin/coa inspect:routes                                # the booted route table
+php bin/coa inspect:services                               # what the DI container has registered
+php bin/coa inspect:tools                                 # registered #[Tool]s (or "no tool registry")
 ```
 
 `make:controller` is real `milpa/devtools` machinery (`Milpa\DevTools\Make\Generators\ControllerGenerator`
@@ -134,6 +143,19 @@ Controller::index`. The command then prints the one manual step it can't do dete
 add the generated plugin's `::class` to `config/plugins.php`. Do that, reload, and the new route
 serves a real response. Pass `--flavor=legacy` to force the old `Milpa\Plugins\*` +
 `BaseController` host convention instead; `--path=/route` sets the route path.
+
+The same `Generator` + `WriteGuard` engine backs `make:entity` (a persisting domain model +
+`FileRepository`), `make:plugin` (a standalone composition unit), `make:service` (a DI-registered
+domain service, optionally with a companion interface via `--interface`), `make:tool` (a
+`#[Tool]`-attributed AI-callable method — requires `composer require milpa/tool-runtime` in your
+own project to actually load), and `make:crud` (entity + a 5-method REST controller + routes +
+wiring plugin, composed from `make:entity` plus a new controller shape). Run `php bin/coa` with no
+arguments for the full command/option reference. The `inspect:*` commands boot the real kernel and
+report what they find — `inspect:services` reaches into the concrete
+`Symfony\Component\DependencyInjection\ContainerBuilder` under `Milpa\Container\DIContainer` (the
+DI contract itself exposes no enumeration method), and `inspect:routes` reconstructs the route
+table from every booted `RouteProviderInterface` plugin (`Milpa\Http\Routing\Router` exposes no
+route-table accessor of its own).
 
 ## What this is NOT
 
