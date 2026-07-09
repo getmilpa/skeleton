@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/getmilpa/skeleton/compare/v0.2.0...v0.3.0) (2026-07-09)
+
+
+### Features
+
+* coa make:entity scaffolds a persisting entity ([5683aec](https://github.com/getmilpa/skeleton/commit/5683aecfe5e3f0d3944d4fbb7effbfa44469730f))
+
+
+### Miscellaneous Chores
+
+* release 0.3.0 ([ed04bbc](https://github.com/getmilpa/skeleton/commit/ed04bbc65270aa219edaeb7fd8e97c01ffb69e02))
+
 ## [0.2.0](https://github.com/getmilpa/skeleton/compare/v0.1.0...v0.2.0) (2026-07-09)
 
 
