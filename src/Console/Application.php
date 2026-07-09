@@ -7,6 +7,8 @@ namespace App\Console;
 use Milpa\Container\DIContainer;
 use Milpa\DevTools\Make\GenerationContext;
 use Milpa\DevTools\Make\Generators\ControllerGenerator;
+use Milpa\DevTools\Make\Generators\EntityGenerator;
+use Milpa\DevTools\Make\VerifyRunner;
 use Milpa\DevTools\Make\WriteGuard;
 use Milpa\Exceptions\AttributeNotFoundException;
 use Milpa\Exceptions\Plugin\PluginDependencyException;
@@ -18,7 +20,7 @@ use Milpa\Runtime\Support\RootNotFoundException;
 use Milpa\Services\CapabilityGraphChecker;
 
 /**
- * The skeleton's minimal `coa` CLI: three subcommands wired directly to `milpa/runtime`'s
+ * The skeleton's minimal `coa` CLI: four subcommands wired directly to `milpa/runtime`'s
  * {@see Kernel} and `milpa/devtools`' generate/inspect layers. No Symfony Console, no command
  * bus — just enough `argv` dispatch to prove the wiring and stay genuinely useful in a
  * zero-database app.
@@ -42,6 +44,21 @@ use Milpa\Services\CapabilityGraphChecker;
  *   {@see \Milpa\DevTools\Make\GenerationResult::$guidance} says exactly that — and it serves a
  *   real response (proven by `php -S` + `curl`, and by this skeleton's own boot smoke test).
  *   `--flavor=legacy` forces the old host convention; `--path=/route` sets the route.
+ * - `make:entity`     wires `milpa/devtools`' {@see EntityGenerator} + {@see WriteGuard} to
+ *   scaffold a domain model that PERSISTS here. Same auto-detection as `make:controller`: this
+ *   skeleton is a `milpa/runtime` app, so devtools picks the RUNTIME flavor with no flag — a plain
+ *   `final readonly class implements Milpa\Data\EntityInterface` (`id()`/`toArray()`/`fromArray()`,
+ *   no Doctrine) under `src/Plugins/<Plugin>/Entities/`, and because an orphaned entity persists
+ *   nothing, ALSO a minimal {@see \Milpa\Interfaces\Plugin\PluginInterface} plugin whose `boot()`
+ *   registers a `Milpa\Data\FileRepository` for it (JSON at `var/<table>.json`) under the DI key
+ *   `<Entity>::class . 'Repository'` — or, if that plugin area already exists, the exact `boot()`
+ *   snippet to hand-add. Register the generated plugin in `config/plugins.php` (the printed
+ *   {@see \Milpa\DevTools\Make\GenerationResult::$guidance} says exactly that) and a consumer
+ *   resolves the repository via `$container->get(<Entity>::class . 'Repository')`, `save()`s an
+ *   entity, and a fresh process rereads it from the JSON file — zero Doctrine, zero DB. The result
+ *   is then run through {@see VerifyRunner} to certify the produced class satisfies the runtime
+ *   entity convention (`--fields="name:type[:mods],..."` DSL; `--table=` names the file;
+ *   `--flavor=legacy` forces the Doctrine convention).
  *
  * `milpa/devtools`' manifest-file-oriented Inspect layer (`CapabilityGraphValidator`,
  * `PluginManifestValidator`, `ProviderImplementsValidator`) expects `milpa.json` files on disk —
@@ -65,6 +82,7 @@ final class Application
             'doctor' => $this->doctor(),
             'validate' => $this->validate(),
             'make:controller' => $this->makeController($args),
+            'make:entity' => $this->makeEntity($args),
             default => $this->help(),
         };
     }
@@ -202,6 +220,60 @@ final class Application
         return 0;
     }
 
+    /** @param list<string> $args */
+    private function makeEntity(array $args): int
+    {
+        if (\count($args) < 2) {
+            $this->line('usage: coa make:entity <PluginName> <EntityName> [--fields="name:type[:mods],..."] [--table=name] [--flavor=runtime|legacy] [--force]');
+
+            return 1;
+        }
+
+        [$plugin, $name] = $args;
+        $options = $this->parseOptions(\array_slice($args, 2));
+        $force = isset($options['force']);
+
+        // Same auto-detection as make:controller: the skeleton has config/plugins.php and an App\
+        // PSR-4 root with no milpa.json, so ConventionDetector selects the RUNTIME flavor with no
+        // --flavor — a plain Milpa\Data\EntityInterface entity plus a booting plugin that registers
+        // a Milpa\Data\FileRepository for it. --flavor=legacy forces the Doctrine convention.
+        $context = new GenerationContext(plugin: $plugin, name: $name, options: $options, root: $this->root);
+        $result = (new EntityGenerator())->generate($context);
+
+        $guard = new WriteGuard();
+        foreach ($result->files as $file) {
+            $guard->assertWritable($file->path, $force);
+        }
+        foreach ($result->files as $file) {
+            $guard->write($file->path, $file->contents);
+            $this->line("✔ wrote {$file->path}");
+        }
+
+        // The one manual step the generator cannot do deterministically — registering a freshly
+        // generated plugin in config/plugins.php, or the FileRepository snippet to add to an
+        // existing one. Surface it verbatim so the scaffolded entity actually reaches persistence.
+        if ($result->guidance !== null) {
+            $this->line('');
+            $this->line($result->guidance);
+        }
+
+        // Unlike make:controller, the verify step IS wired here: EntityVerifier::verifyRuntime()
+        // only reflects the generated entity itself + checks Milpa\Data\EntityInterface (a hard
+        // dependency, always loadable) — it never touches a host-specific base class, so there is no
+        // "throws when BaseController is absent" landmine to dodge. Certify the produced class
+        // satisfies the runtime entity convention in the same request that just wrote it.
+        if ($result->verifyKind !== null && $result->verifyTarget !== null) {
+            $verify = (new VerifyRunner())->run($result->verifyKind, $result->verifyTarget, $this->root, $result->flavor);
+            $this->line('');
+            $this->line($verify['output']);
+            if (!$verify['ok']) {
+                return 1;
+            }
+        }
+
+        return 0;
+    }
+
     private function help(): int
     {
         $this->line('milpa · coa — the skeleton\'s minimal CLI');
@@ -209,8 +281,10 @@ final class Application
         $this->line('  coa doctor                                    boot the kernel, report what came up');
         $this->line('  coa validate                                  static pre-boot capability check (no boot())');
         $this->line('  coa make:controller <Plugin> <Name> [opts]     scaffold a booting PSR-7 controller + route');
+        $this->line('  coa make:entity <Plugin> <Name> [opts]         scaffold a persisting entity + FileRepository');
         $this->line('');
         $this->line('  opts for make:controller: --path=/route  --flavor=runtime|legacy  --force');
+        $this->line('  opts for make:entity:     --fields="name:type[:mods],..."  --table=name  --flavor=runtime|legacy  --force');
 
         return 0;
     }
