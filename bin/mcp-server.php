@@ -13,6 +13,20 @@ require __DIR__ . '/../vendor/autoload.php';
 
 $root = \dirname(__DIR__);
 
+// Agent-ready (the MCP/tools surface) is OPT-IN (skeleton 0.5.1) — `milpa/tool-runtime` and
+// `milpa/mcp-server` moved from `require` to `suggest` in composer.json, so a stock
+// `composer create-project milpa/skeleton` app does NOT have these classes available. Probing with
+// class_exists() (default $autoload=true) is safe either way: it runs Composer's autoloader, which
+// simply reports "not found" when the packages are absent — no fatal, no warning. `::class` on an
+// imported name that isn't loadable is always safe too (it's resolved at compile time to a plain
+// string, no autoload triggered), so the `use` imports above never break when these packages are
+// missing. When absent, this prints guidance and exits 0 — an app with no agent-ready surface
+// enabled yet is the honest default, not an error.
+if (!\class_exists(ToolRegistry::class) || !\class_exists(JsonRpcService::class)) {
+    fwrite(STDERR, 'Agent-ready surface not enabled. Run: composer require milpa/tool-runtime milpa/mcp-server  (or: php bin/coa agent:enable)' . \PHP_EOL);
+    exit(0);
+}
+
 // Same config-loading contract `bin/coa` uses: config/plugins.php declares the active plugin
 // list, config/app.php is the optional app-config bag Kernel::boot() threads into
 // Milpa\Runtime\Config. Missing config/app.php is not fatal — an empty bag boots fine.
@@ -35,7 +49,8 @@ if (!\is_array($config)) {
 // docs/library/vision-milpa-commands.md's "MCP disuelve make:mcp-server"): boots the REAL kernel
 // with a fresh ToolRegistry wired in, so every #[Tool] a booted ToolProviderInterface plugin
 // registers is exposed here automatically — an app with tools does NOT copy this file, it just
-// has one. An app with zero tools still boots clean and serves an empty `tools/list`.
+// has one. An app with zero tools still boots clean and serves an empty `tools/list`. Reached only
+// once the guard above confirms both agent-ready packages are actually installed.
 $kernel = Kernel::boot([
     'root' => $root,
     'plugins' => $plugins,

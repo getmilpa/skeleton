@@ -54,11 +54,32 @@ root: /path/to/myapp
 | Path | What it is |
 |---|---|
 | `public/index.php` | The HTTP entry point: builds a PSR-7 request from globals, boots the kernel, dispatches through `Milpa\Runtime\Http\RequestHandler`, emits the response. |
-| `bin/coa` | The CLI entry point — `doctor`, `validate`, `make:controller`/`entity`/`plugin`/`service`/`tool`/`crud`, `inspect:plugins`/`routes`/`services`/`tools`. See [`src/Console/Application.php`](src/Console/Application.php). |
+| `bin/coa` | The CLI entry point — `doctor`, `validate`, `make:controller`/`entity`/`plugin`/`service`/`tool`/`crud`, `inspect:plugins`/`routes`/`services`/`tools`/`commands`, `agent:enable`. See [`src/Console/Application.php`](src/Console/Application.php). |
+| `bin/mcp-server.php` | The generic MCP stdio server. Only serves once agent-ready is turned on (see below) — a stock app prints guidance and exits `0`. |
 | `config/plugins.php` | The active-plugins list — a plain `list<class-string>`. This is the *only* source of truth for what boots; no database, no filesystem discovery. |
 | `config/app.php` | The app-config bag. Registered by `Kernel::boot()` as `Milpa\Runtime\Config`; plugins read it in `boot()`. See [The Config idiom](#the-config-idiom). |
 | `src/Plugins/HelloPlugin/` | The example plugin: `#[PluginMetadata]`, no `provides`/`requires`, one `GET /` route, and the Config read that drives the homepage greeting. Copy its shape for your own plugins. |
 | `tests/Boot/KernelBootTest.php` | The boot smoke test: the kernel boots from `config/plugins.php` and `GET /` returns 200. |
+
+## Agent-ready is opt-in
+
+The stock app is **minimal**: `composer create-project milpa/skeleton` pulls no AI/MCP packages, and
+`require` in `composer.json` lists none. `bin/mcp-server.php` and `coa inspect:tools` both still run
+— they just report that the surface isn't on yet, cleanly, with no fatal.
+
+Turn it on when you actually want to expose this app's tools over MCP:
+
+```bash
+php bin/coa agent:enable
+# — a thin wrapper over —
+composer require milpa/tool-runtime milpa/mcp-server
+```
+
+Either one installs `milpa/tool-runtime` (the `#[Tool]` attribute + registry) and `milpa/mcp-server`
+(the JSON-RPC/stdio transport). Once installed, `bin/mcp-server.php` serves every `#[Tool]` a booted
+`ToolProviderInterface` plugin registers, and `coa inspect:tools` lists them. `coa make:tool` prints
+the same "not detected, run `composer require milpa/tool-runtime`" guidance if you scaffold a tool
+before opting in.
 
 ## Add a plugin
 
@@ -129,7 +150,8 @@ php bin/coa make:crud BoardPlugin Task --fields="title:string:200,status:string:
 php bin/coa inspect:plugins                               # booted plugins + their capability graph
 php bin/coa inspect:routes                                # the booted route table
 php bin/coa inspect:services                               # what the DI container has registered
-php bin/coa inspect:tools                                 # registered #[Tool]s (or "no tool registry")
+php bin/coa inspect:tools                                 # registered #[Tool]s (or "agent-ready not enabled")
+php bin/coa agent:enable                                  # opt in: composer require tool-runtime + mcp-server
 ```
 
 `make:controller` is real `milpa/devtools` machinery (`Milpa\DevTools\Make\Generators\ControllerGenerator`

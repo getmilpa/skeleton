@@ -99,6 +99,16 @@ use Symfony\Component\DependencyInjection\ContainerBuilder;
  * so `inspect:tools` sees whatever a booted `ToolProviderInterface` plugin actually registered
  * instead of always reporting "no tool registry". `bin/mcp-server.php` (new) exposes that same
  * registry shape over MCP stdio via `milpa/mcp-server`'s `JsonRpcService` — no per-app copy needed.
+ *
+ * **Agent-ready is opt-in (skeleton 0.5.1).** `milpa/tool-runtime` and `milpa/mcp-server` are
+ * `suggest`-only in composer.json, not hard dependencies — a stock `composer create-project
+ * milpa/skeleton` app is minimal and does not pull the AI/MCP surface. {@see
+ * self::bootKernelForInspect()} wires a {@see ToolRegistry} only when `milpa/tool-runtime` is
+ * actually installed (a `class_exists()` guard, same pattern `bin/mcp-server.php` uses); when it
+ * isn't, `inspect:tools` prints a clean "not enabled" message instead of always reporting an empty
+ * registry, and every other `inspect:*`/`doctor` command is entirely unaffected. `coa agent:enable`
+ * ({@see self::agentEnable()}) is the opt-in switch: a thin `composer require milpa/tool-runtime
+ * milpa/mcp-server` wrapper.
  */
 final class Application
 {
@@ -126,6 +136,7 @@ final class Application
             'inspect:services' => $this->inspectServices(),
             'inspect:tools' => $this->inspectTools(),
             'inspect:commands' => $this->inspectCommands(),
+            'agent:enable' => $this->agentEnable(),
             default => $this->runDiscoveredCommand($command, $args),
         };
     }
@@ -448,18 +459,129 @@ final class Application
     }
 
     /**
+     * `coa agent:enable` (skeleton 0.5.1) — the opt-in switch for the agent-ready surface. Deliberately
+     * NOT its own reimplementation of dependency resolution: it is a thin, honest wrapper over
+     * `composer require milpa/tool-runtime milpa/mcp-server`, shelled out via {@see \proc_open()}
+     * with an array command (no shell interpolation) and STDIN/STDOUT/STDERR inherited so Composer's
+     * own real-time output streams straight through — the same "just run the real tool" spirit as
+     * {@see self::makeController()}'s comment about not reflecting a legacy base class that may not
+     * exist. Once those two packages land, `bin/mcp-server.php` and `inspect:tools`
+     * ({@see self::bootKernelForInspect()}) pick them up automatically via their own `class_exists()`
+     * guards — nothing else here needs to change.
+     */
+    private function agentEnable(): int
+    {
+        $this->line('milpa · coa agent:enable — enabling the agent-ready surface (MCP/tools)');
+        $this->line('');
+
+        $composer = $this->findComposerBinary();
+        if ($composer === null) {
+            $this->line('✗ composer executable not found on PATH.');
+            $this->line('  Install Composer (https://getcomposer.org), then run:');
+            $this->line('    composer require milpa/tool-runtime milpa/mcp-server');
+
+            return 1;
+        }
+
+        $command = [$composer, 'require', 'milpa/tool-runtime', 'milpa/mcp-server'];
+        $this->line('$ ' . \implode(' ', $command));
+        $this->line('');
+
+        $exitCode = $this->runComposerRequire($command);
+        $this->line('');
+
+        if ($exitCode !== 0) {
+            $this->line("✗ composer require failed (exit {$exitCode}) — agent-ready surface not enabled.");
+
+            return $exitCode;
+        }
+
+        $this->line('✔ agent-ready enabled — bin/mcp-server.php now exposes your tools over MCP.');
+        $this->line('  Try: php bin/coa inspect:tools');
+        $this->line('       php bin/mcp-server.php');
+
+        return 0;
+    }
+
+    /**
+     * A plain PATH scan for a `composer`/`composer.phar` executable — no shell (`command -v` / `which`)
+     * involved, so this has no dependency on a POSIX shell being available, and no reliance on
+     * `exec()`'s output-parsing quirks. Returns null (never throws) when nothing is found, so
+     * {@see self::agentEnable()} can fail gracefully with actionable guidance instead of a fatal
+     * "unable to fork" from `\proc_open()`.
+     */
+    private function findComposerBinary(): ?string
+    {
+        $pathEnv = \getenv('PATH');
+        if (!\is_string($pathEnv) || $pathEnv === '') {
+            return null;
+        }
+
+        $isWindows = \DIRECTORY_SEPARATOR === '\\';
+        $names = $isWindows ? ['composer.bat', 'composer.exe', 'composer'] : ['composer', 'composer.phar'];
+
+        foreach (\explode(\PATH_SEPARATOR, $pathEnv) as $dir) {
+            if ($dir === '') {
+                continue;
+            }
+            foreach ($names as $name) {
+                $candidate = \rtrim($dir, '/\\') . \DIRECTORY_SEPARATOR . $name;
+                if (\is_file($candidate) && \is_executable($candidate)) {
+                    return $candidate;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Runs `$command` (already the full argv, e.g. `[composer, require, milpa/tool-runtime,
+     * milpa/mcp-server]`) via `\proc_open()` with this app's root as the working directory — the
+     * project whose composer.json/vendor should actually change — and STDIN/STDOUT/STDERR wired
+     * straight to this process's own, so Composer's real progress output is visible live instead of
+     * being buffered and replayed. Returns the child's real exit code; `\proc_open()` itself
+     * returning a non-resource (composer binary somehow unspawnable despite passing the PATH scan
+     * above — e.g. permissions changed mid-run) is reported as exit code 1.
+     *
+     * @param list<string> $command
+     */
+    private function runComposerRequire(array $command): int
+    {
+        $descriptors = [0 => \STDIN, 1 => \STDOUT, 2 => \STDERR];
+
+        $process = \proc_open($command, $descriptors, $pipes, $this->root);
+        if (!\is_resource($process)) {
+            $this->line('✗ failed to start the composer process.');
+
+            return 1;
+        }
+
+        return \proc_close($process);
+    }
+
+    /**
      * Boots the REAL kernel exactly like doctor() does, for the inspect:* commands and discovered
      * commands below — kept as its own helper (rather than reusing doctor()'s inline code) so
      * doctor()'s own output stays byte-for-byte unchanged. Prints the same "✗ ..." diagnostics
      * doctor() would and returns null on any failure, so every caller fails the same way doctor()
      * does on a broken app.
      *
-     * Unlike doctor(), this ALWAYS wires a fresh {@see ToolRegistry} into `Kernel::boot()`
-     * (friction #2, `docs/superpowers/specs/2026-07-09-frictions-command-discovery.md`): the
-     * greenhouse found `inspect:tools` permanently blind because nothing ever passed a
-     * `toolRegistry`, even when a booted `ToolProviderInterface` plugin had tools to register. A
-     * registry with nothing registered is cheap and side-effect-free, so this is safe to do
-     * unconditionally rather than only when some plugin "needs" one.
+     * Unlike doctor(), this wires a fresh {@see ToolRegistry} into `Kernel::boot()` (friction #2,
+     * `docs/superpowers/specs/2026-07-09-frictions-command-discovery.md`): the greenhouse found
+     * `inspect:tools` permanently blind because nothing ever passed a `toolRegistry`, even when a
+     * booted `ToolProviderInterface` plugin had tools to register. A registry with nothing
+     * registered is cheap and side-effect-free, so this is safe to do unconditionally whenever one
+     * is available.
+     *
+     * "Available" is the key word (skeleton 0.5.1): `milpa/tool-runtime` — the package the concrete
+     * {@see ToolRegistry} class lives in — is `suggest`-only, not a hard dependency of this
+     * skeleton, so a stock app will NOT have it installed. `\class_exists(ToolRegistry::class)` is
+     * the guard: it runs Composer's autoloader, which simply fails to find the class when the
+     * package is absent (no fatal), so this only constructs and wires a registry when the package
+     * is actually there. `Milpa\Runtime\Kernel::boot()` itself never requires one — `toolRegistry`
+     * defaults to `null` (see `Kernel::boot()`'s own docblock) — so every other `inspect:*`/`doctor`
+     * boot path is unaffected either way.
      */
     private function bootKernelForInspect(): ?Kernel
     {
@@ -470,13 +592,13 @@ final class Application
 
         $config = $this->loadConfig();
 
+        $bootConfig = ['root' => $this->root, 'plugins' => $plugins, 'config' => $config];
+        if (\class_exists(ToolRegistry::class)) {
+            $bootConfig['toolRegistry'] = new ToolRegistry(new NullLogger());
+        }
+
         try {
-            return Kernel::boot([
-                'root' => $this->root,
-                'plugins' => $plugins,
-                'config' => $config,
-                'toolRegistry' => new ToolRegistry(new NullLogger()),
-            ]);
+            return Kernel::boot($bootConfig);
         } catch (AttributeNotFoundException|PluginDependencyException|RootNotFoundException $e) {
             $this->line('✗ boot failed: ' . $e->getMessage());
 
@@ -655,11 +777,14 @@ final class Application
      * `Milpa\Interfaces\Tooling\ToolRegistryInterface` (core), whose contract has NO
      * summary-listing method of its own (`register()` only) — `getToolSummaries()` exists solely
      * on the concrete `Milpa\ToolRuntime\ToolRegistry`, so this narrows with `instanceof` rather
-     * than reflecting. That narrowing is a plain type-check (not a duck-typing workaround) now
-     * that `milpa/tool-runtime` is a direct dependency of this skeleton (added alongside
-     * `milpa/mcp-server` — see composer.json), and {@see self::bootKernelForInspect()} always wires
-     * one in (friction #2 fix), so the `null`/wrong-type branches below are defensive only — they
-     * can't happen via this class's own boot path, only if a future edit stops wiring a registry.
+     * than reflecting.
+     *
+     * `milpa/tool-runtime` (where that concrete class lives) is `suggest`-only, not a hard
+     * dependency of this skeleton (skeleton 0.5.1) — {@see self::bootKernelForInspect()} only wires
+     * a registry when the package is actually installed (its own `class_exists()` guard). So the
+     * `!$registry instanceof ToolRegistry` branch below now covers a REAL, common case — agent-ready
+     * not enabled — not just a defensive one, and prints guidance to opt in instead of a bare "no
+     * tools" message.
      */
     private function inspectTools(): int
     {
@@ -673,7 +798,8 @@ final class Application
 
         $registry = $kernel->toolRegistry();
         if (!$registry instanceof ToolRegistry) {
-            $this->line('no tools / no tool registry.');
+            $this->line('no tool registry — agent-ready not enabled.');
+            $this->line('Run: composer require milpa/tool-runtime milpa/mcp-server  (or: php bin/coa agent:enable)');
 
             return 0;
         }
@@ -855,6 +981,7 @@ final class Application
             'inspect:services' => 'list what the DI container has registered',
             'inspect:tools' => 'list registered #[Tool]s (or "no tool registry")',
             'inspect:commands' => 'list built-in + plugin-discovered coa commands',
+            'agent:enable' => 'opt in to the agent-ready surface (composer require tool-runtime + mcp-server)',
         ];
     }
 
@@ -875,6 +1002,7 @@ final class Application
         $this->line('  coa inspect:services                           list what the DI container has registered');
         $this->line('  coa inspect:tools                              list registered #[Tool]s (or "no tool registry")');
         $this->line('  coa inspect:commands                           list built-in + plugin-discovered coa commands');
+        $this->line('  coa agent:enable                               opt in to agent-ready (composer require tool-runtime + mcp-server)');
         $this->line('');
         $this->line('  opts for make:controller: --path=/route  --flavor=runtime|legacy  --force');
         $this->line('  opts for make:entity:     --fields="name:type[:mods],..."  --table=name  --flavor=runtime|legacy  --force');
