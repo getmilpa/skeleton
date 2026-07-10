@@ -66,6 +66,8 @@ if (!$registry instanceof ToolRegistry) {
     exit(1);
 }
 
+(new \App\Command\McpProjector())->project($kernel->commands(), $registry, $kernel->container());
+
 $service = new JsonRpcService($registry);
 
 // STDOUT is protocol-only: one JSON-RPC message per line. Human-readable output goes to STDERR

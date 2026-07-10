@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace App\Console;
 
+use App\Command\CliProjector;
+use App\Command\McpProjector;
 use Milpa\Attributes\PluginMetadata;
+use Milpa\Command\Operation;
 use Milpa\Container\DIContainer;
 use Milpa\DevTools\Make\GenerationContext;
 use Milpa\DevTools\Make\GenerationResult;
@@ -20,7 +23,6 @@ use Milpa\Exceptions\AttributeNotFoundException;
 use Milpa\Exceptions\Plugin\PluginDependencyException;
 use Milpa\Http\HttpMethod;
 use Milpa\Interfaces\Plugin\PluginInterface;
-use Milpa\Runtime\CommandDefinition;
 use Milpa\Runtime\CommandProviderInterface;
 use Milpa\Runtime\Config;
 use Milpa\Runtime\Http\RouteProviderInterface;
@@ -804,6 +806,8 @@ final class Application
             return 0;
         }
 
+        (new McpProjector())->project($kernel->commands(), $registry, $kernel->container());
+
         $summaries = $registry->getToolSummaries();
         if ($summaries === []) {
             $this->line('(no tools registered)');
@@ -906,57 +910,15 @@ final class Application
         return $this->help();
     }
 
-    /**
-     * Invokes a discovered {@see CommandDefinition}'s handler. Per its docblock, `$handler` is
-     * either a plain PHP callable (the declaring plugin already closed over its own dependencies)
-     * or a `[class-string, method]` pair — mirroring `milpa/http`'s `HandlerReference` for routes
-     * — which this resolves through the booted kernel's DI container before calling, exactly like
-     * {@see \Milpa\Runtime\Http\ContainerHandlerResolver} does for a route's handler.
-     *
-     * `is_callable()` is checked FIRST, before the container branch: a genuine PHP callable can
-     * itself be shaped as an array (`[$object, 'method']`, `['ClassName', 'staticMethod']`), which
-     * would otherwise be ambiguous with the `[class-string, method]`-for-the-container shape.
-     * Checking `is_callable()` first resolves the ambiguity — anything already directly callable
-     * is called as-is; only a `[class-string, method]` pair that ISN'T already callable (the
-     * ordinary case: a non-static method with no bound instance) falls to container resolution —
-     * per {@see CommandDefinition}'s own docblock, that is the only other shape `$handler` takes.
-     *
-     * The handler receives the remaining argv parsed into a `--flag=value` option bag — the exact
-     * shape {@see self::parseOptions()} already produces for every `make:*` command. Its return
-     * value decides what happens next: an `int` becomes the process exit code; a `string` is
-     * printed as-is; anything else non-null is JSON-encoded and printed; `null` prints nothing.
-     * Every case still exits `0` unless the handler explicitly returned an `int`.
-     *
-     * @param list<string> $args
-     */
-    private function invokeCommand(CommandDefinition $definition, array $args, Kernel $kernel): int
+    /** @param list<string> $args */
+    private function invokeCommand(Operation $definition, array $args, Kernel $kernel): int
     {
-        $handler = $definition->handler;
-        $options = $this->parseOptions($args);
-
-        if (\is_callable($handler)) {
-            /** @var mixed $result */
-            $result = $handler($options);
-        } else {
-            [$class, $method] = $handler;
-            $instance = $kernel->container()->get($class);
-            if (!\is_object($instance)) {
-                $this->line("✗ command '{$definition->name}': {$class} did not resolve to an object.");
-
-                return 1;
-            }
-            /** @var mixed $result */
-            $result = $instance->{$method}($options);
-        }
-
-        if (\is_int($result)) {
-            return $result;
-        }
-        if ($result !== null) {
-            $this->line(\is_string($result) ? $result : (string) \json_encode($result));
-        }
-
-        return 0;
+        return (new CliProjector())->run(
+            $definition,
+            $args,
+            $kernel->container(),
+            fn (string $line) => $this->line($line),
+        );
     }
 
     /**
