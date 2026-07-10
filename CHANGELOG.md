@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.6.0](https://github.com/getmilpa/skeleton/compare/v0.5.0...v0.6.0) (2026-07-10)
+
+
+### Features
+
+* agent-ready is opt-in — the stock app is minimal ([568b0fb](https://github.com/getmilpa/skeleton/commit/568b0fb1df328f7e416b07ac423ab14f707ce1ac))
+* Command-as-atom host-side projectors — CLI, MCP, HTTP ([cc523b7](https://github.com/getmilpa/skeleton/commit/cc523b74aa7916f84ed0ee43d86bac251ca88dc9))
+
+
+### Miscellaneous Chores
+
+* release 0.5.1 ([c622bab](https://github.com/getmilpa/skeleton/commit/c622babd945d07364aba45bb752f56ecfd53936a))
+* release 0.6.0 ([fbd453a](https://github.com/getmilpa/skeleton/commit/fbd453a60369ba37ea89278cd42e5f36964405b7))
+
 ## [0.5.1](https://github.com/getmilpa/skeleton/compare/v0.5.0...v0.5.1) (2026-07-09)
 
 
