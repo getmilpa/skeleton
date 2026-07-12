@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/getmilpa/skeleton/compare/v0.5.2...v0.6.1) (2026-07-12)
+
+
+### Bug Fixes
+
+* re-cut the runtime 0.4 pin above 0.6.0 ([c7c5ec2](https://github.com/getmilpa/skeleton/commit/c7c5ec21a51aa8cbe6bc6bc61c6e416836e56efc))
+
 ## [0.5.2](https://github.com/getmilpa/skeleton/compare/v0.6.0...v0.5.2) (2026-07-12)
 
 
