@@ -51,9 +51,12 @@ use Symfony\Component\DependencyInjection\ContainerBuilder;
  *   and the `config/app.php` config bag, then reports what actually came up: root, collaborators,
  *   booted plugin names, declared routes, and the `app.greeting` value read back out of the
  *   container's {@see Config}. The live "does this app start" check — every configured plugin's `boot()` runs.
- * - `validate`        runs `milpa/core`'s {@see CapabilityGraphChecker} — the exact checker
- *   `Kernel::boot()` calls internally — over the *instantiated but unbooted* configured
- *   plugins. A static, side-effect-free pre-boot certification (`boot()` never runs).
+ * - `validate`        runs `milpa/core`'s {@see CapabilityGraphChecker} over the *instantiated
+ *   but unbooted* configured plugins — a static, side-effect-free pre-boot certification
+ *   (`boot()` never runs). Since runtime 0.4, {@see Kernel::boot()} itself resolves the graph
+ *   through `milpa/resolver` instead: a blocked architecture throws the typed
+ *   `ArchitectureBlockedException` (a `PluginDependencyException`, so existing catches hold)
+ *   carrying the full `ResolutionReport`. `validate` stays the lighter same-contracts preview.
  * - `make:controller` wires `milpa/devtools`' {@see ControllerGenerator} + {@see WriteGuard} to
  *   scaffold a controller that BOOTS here. devtools auto-detects the convention per app root
  *   ({@see \Milpa\DevTools\Make\ConventionDetector}): this skeleton is a `milpa/runtime` app

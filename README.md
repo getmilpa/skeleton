@@ -192,15 +192,18 @@ route-table accessor of its own).
 
 ## The family
 
-This skeleton composes six published Milpa packages, unmodified:
+This skeleton composes eight published Milpa packages, unmodified:
 
 - [`milpa/runtime`](https://packagist.org/packages/milpa/runtime) — the bootable kernel that
   wires the rest together
+- [`milpa/resolver`](https://packagist.org/packages/milpa/resolver) — resolves the architecture
+  before booting it: the report validates the graph, orders the boot, and turns failures into
+  learnable errors
 - [`milpa/core`](https://packagist.org/packages/milpa/core) — contracts, capability graph, events
 - [`milpa/container`](https://packagist.org/packages/milpa/container) — the DI container
 - [`milpa/events`](https://packagist.org/packages/milpa/events) — the event dispatcher
 - [`milpa/http`](https://packagist.org/packages/milpa/http) — PSR-15-native routing contracts
-- [`milpa/plugin`](https://packagist.org/packages/milpa/plugin) — capability-ordered plugin boot
+- [`milpa/plugin`](https://packagist.org/packages/milpa/plugin) — the plugin contracts
 - [`milpa/devtools`](https://packagist.org/packages/milpa/devtools) — the engine behind `bin/coa`
 
 ## Contributing
