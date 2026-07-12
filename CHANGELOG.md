@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/getmilpa/skeleton/compare/v0.6.1...v0.6.2) (2026-07-12)
+
+
+### Bug Fixes
+
+* receive milpa/core 0.6 — pin bump ([12d48cb](https://github.com/getmilpa/skeleton/commit/12d48cbedd4716d61d66725733ea1fd5d15892b6))
+
 ## [0.6.1](https://github.com/getmilpa/skeleton/compare/v0.5.2...v0.6.1) (2026-07-12)
 
 
