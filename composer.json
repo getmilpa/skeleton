@@ -7,7 +7,7 @@
     "php": ">=8.3",
     "milpa/command": "^0.1",
     "milpa/container": "^0.1",
-    "milpa/core": "^0.5",
+    "milpa/core": "^0.6",
     "milpa/data": "^0.1",
     "milpa/devtools": "^0.5",
     "milpa/events": "^0.2",
