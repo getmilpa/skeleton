@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.3](https://github.com/getmilpa/skeleton/compare/v0.6.2...v0.6.3) (2026-07-13)
+
+
+### Bug Fixes
+
+* phpstan green on the base install — real config shape, documented agent-ready ignores ([b629acc](https://github.com/getmilpa/skeleton/commit/b629acc06d778bd0701df535e85e96a4378bf7f3))
+
 ## [0.6.2](https://github.com/getmilpa/skeleton/compare/v0.6.1...v0.6.2) (2026-07-12)
 
 
