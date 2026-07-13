@@ -213,8 +213,8 @@ follows a standard code of conduct.
 
 ## License
 
-[Apache-2.0](LICENSE) © TeamX Agency.
+[Apache-2.0](LICENSE) © Rodrigo Vicente - TeamX Agency.
 
 ---
 
-Milpa is designed, built, and maintained by **[TeamX Agency](https://teamx.agency/?utm_source=github&utm_medium=readme&utm_campaign=milpa&utm_content=skeleton)**.
+Milpa is designed, built, and maintained by **[Rodrigo Vicente - TeamX Agency](https://teamx.agency/?utm_source=github&utm_medium=readme&utm_campaign=milpa&utm_content=skeleton)**.

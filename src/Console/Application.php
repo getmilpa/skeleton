@@ -1,5 +1,15 @@
 <?php
 
+/**
+ * This file is part of Milpa Skeleton — the composer create-project starting point for a Milpa app.
+ *
+ * (c) Rodrigo Vicente - TeamX Agency — https://teamx.agency <hola@teamx.agency>
+ *
+ * @license Apache-2.0
+ *
+ * @link    https://github.com/getmilpa/skeleton
+ */
+
 declare(strict_types=1);
 
 namespace App\Console;
@@ -23,6 +33,7 @@ use Milpa\Exceptions\AttributeNotFoundException;
 use Milpa\Exceptions\Plugin\PluginDependencyException;
 use Milpa\Http\HttpMethod;
 use Milpa\Interfaces\Plugin\PluginInterface;
+use Milpa\Interfaces\Tooling\ToolRegistryInterface;
 use Milpa\Runtime\CommandProviderInterface;
 use Milpa\Runtime\Config;
 use Milpa\Runtime\Http\RouteProviderInterface;
@@ -599,7 +610,16 @@ final class Application
 
         $bootConfig = ['root' => $this->root, 'plugins' => $plugins, 'config' => $config];
         if (\class_exists(ToolRegistry::class)) {
-            $bootConfig['toolRegistry'] = new ToolRegistry(new NullLogger());
+            // Kernel::boot()'s config shape types this offset as core's ToolRegistryInterface —
+            // and on the base install (tool-runtime absent) static analysis cannot know the
+            // optional package's concrete class implements it, so prove it structurally at
+            // runtime: a tool-runtime whose registry stopped implementing core's interface
+            // degrades to a no-registry boot (inspect:tools teaches the opt-in) instead of
+            // handing the Kernel a config it never sanctioned.
+            $registry = new ToolRegistry(new NullLogger());
+            if ($registry instanceof ToolRegistryInterface) {
+                $bootConfig['toolRegistry'] = $registry;
+            }
         }
 
         try {

@@ -3,6 +3,12 @@
   "description": "The composer create-project starting point for a Milpa app: boots milpa/runtime's Kernel, serves a real HTTP response with zero database, and ships a coa CLI (doctor/validate/make/inspect, plus every plugin-declared CommandProviderInterface command) wired to milpa/devtools. Minimal by default \u2014 the agent-ready surface (MCP/tools, bin/mcp-server.php) is opt-in via `composer require milpa/tool-runtime milpa/mcp-server` or `php bin/coa agent:enable`.",
   "type": "project",
   "license": "Apache-2.0",
+  "authors": [
+    {
+      "name": "Rodrigo Vicente - TeamX Agency",
+      "homepage": "https://teamx.agency"
+    }
+  ],
   "require": {
     "php": ">=8.3",
     "milpa/command": "^0.1",
