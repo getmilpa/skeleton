@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.7.0](https://github.com/getmilpa/skeleton/compare/v0.6.4...v0.7.0) (2026-07-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* HttpProjector enforces scopes — the Artifact 09 hole closes
+
+### Features
+
+* HttpProjector enforces scopes — the Artifact 09 hole closes ([efd8d56](https://github.com/getmilpa/skeleton/commit/efd8d564175bd3dfcac08483ae3a005a0508e211))
+
 ## [0.6.4](https://github.com/getmilpa/skeleton/compare/v0.6.3...v0.6.4) (2026-07-14)
 
 
