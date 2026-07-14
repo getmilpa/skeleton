@@ -14,6 +14,14 @@ declare(strict_types=1);
 
 namespace App\Command;
 
+use Milpa\Auth\AuthContext;
+use Milpa\Auth\Contracts\AuthContextFactory;
+use Milpa\Auth\Contracts\CredentialVerifier;
+use Milpa\Auth\Exceptions\AuthContextMissingException;
+use Milpa\Auth\Exceptions\AuthMiddlewareNotInstalledException;
+use Milpa\Auth\Exceptions\ScopeDeniedException;
+use Milpa\Auth\Http\AuthenticateMiddleware;
+use Milpa\Auth\Http\RequireScopeMiddleware;
 use Milpa\Command\Operation;
 use Milpa\Command\SurfaceProjector;
 use Milpa\Http\HttpMethod;
@@ -21,18 +29,48 @@ use Milpa\Http\Routing\HandlerReference;
 use Milpa\Http\Routing\Route;
 use Milpa\Http\Routing\RouteResult;
 use Milpa\Interfaces\Di\DIContainerInterface;
+use Milpa\ToolRuntime\Contracts\ToolContext;
+use Milpa\ToolRuntime\PolicyGate;
+use Milpa\ToolRuntime\ToolDefinition;
 use Nyholm\Psr7\Response;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
+use Psr\Http\Server\RequestHandlerInterface;
 
 /**
  * Projects Operations to the HTTP surface. It is BOTH a route source — `routes()` synthesizes one
  * bound Route per operation (path declared or derived from the name; verb from `mutating`) — AND the
  * generic adapter controller those routes point at: `handle()` looks the operation up from the
- * matched RouteResult, applies the two-step confirm gate for mutating operations, merges path +
- * query + body into one input bag, coerces/validates it, invokes the operation's domain handler,
- * and serializes the returned domain data to JSON. A host plugin registers one instance under
- * HttpProjector::class and returns `routes()` from its own RouteProviderInterface::routes().
+ * matched RouteResult, ENFORCES the operation's declared scopes, applies the two-step confirm gate
+ * for mutating operations, merges path + query + body into one input bag, coerces/validates it,
+ * invokes the operation's domain handler, and serializes the returned domain data to JSON. A host
+ * plugin registers one instance under HttpProjector::class and returns `routes()` from its own
+ * RouteProviderInterface::routes().
+ *
+ * SCOPE ENFORCEMENT — the Artifact 09 hole closes here. HTTP used to run a scope-declaring atom
+ * NAKED: `$op->scopes` was ignored on this surface while MCP enforced it via tool-runtime's
+ * PolicyGate. Now, for an operation whose `$op->scopes` is non-empty, `handle()` runs milpa/auth's
+ * {@see RequireScopeMiddleware} against the {@see AuthContext} that an upstream
+ * {@see AuthenticateMiddleware}/StartSession attached under `'milpa.auth'` — 401
+ * {@see AuthContextMissingException} when no verified actor is present, 403
+ * {@see ScopeDeniedException} when the actor holds none of the required scopes — then rebuilds the
+ * honest {@see ToolContext::web()} (real principal + real scopes, never the faked wildcard) and runs
+ * it through the same {@see PolicyGate} that guards MCP. An operation with EMPTY scopes touches NONE
+ * of this: it is byte-identical to the pre-auth confirm-gate-only path.
+ *
+ * ENFORCEMENT LIVES IN `handle()`, NOT ROUTE MIDDLEWARE, on purpose: there is exactly ONE
+ * HttpProjector instance serving EVERY operation (see below), and a route's `middleware[]` is
+ * resolved by class-string to a SINGLE shared container instance — which cannot carry a per-operation
+ * scope list. The generic handler is the one place each operation's own scopes are known, so it is
+ * where the per-op scope gate must run. The route `middleware[]` slot stays free for app-global
+ * middleware (which the runtime pipeline still composes).
+ *
+ * ROD'S BINDING DISTINCTION: a scope-declaring operation whose host wired NO auth chain (no
+ * {@see CredentialVerifier}/{@see AuthContextFactory} resolvable in the container) is a SERVER
+ * misconfiguration — `handle()` throws {@see AuthMiddlewareNotInstalledException} (500), NEVER a
+ * 401/403. A 4xx would blame the caller; the caller did nothing wrong — the host declared a protected
+ * operation and left it unguarded. tool-runtime (the honest-context/PolicyGate layer) is opt-in, so
+ * that defense-in-depth step is `class_exists`-guarded; the milpa/auth scope gate above is always on.
  *
  * SINGLE INSTANCE PER APP: there must be exactly ONE HttpProjector registered in the container,
  * under the `HttpProjector::class` key — not one per plugin. Every synthesized route's handler is
@@ -110,6 +148,15 @@ final class HttpProjector implements SurfaceProjector
             return $this->json(404, ['error' => 'operation not found']);
         }
 
+        // Scope enforcement — the Artifact 09 hole closes. An operation with EMPTY scopes skips this
+        // entirely and is byte-identical to the pre-auth path below.
+        if ($op->scopes !== []) {
+            $denied = $this->enforceScopes($op, $request);
+            if ($denied !== null) {
+                return $denied;
+            }
+        }
+
         if ($op->mutating && $op->requiresConfirmation) {
             $token = $request->getHeaderLine('Confirm-Token');
             if ($token === '') {
@@ -159,6 +206,90 @@ final class HttpProjector implements SurfaceProjector
         }
 
         return $this->json($op->mutating ? 201 : 200, $data);
+    }
+
+    /**
+     * Enforces `$op`'s declared scopes for one request. Returns `null` when the request is authorized
+     * (the caller proceeds to the confirm gate + handler), or a ready-to-send 401/403 JSON response
+     * when the milpa/auth scope gate denies it. Throws {@see AuthMiddlewareNotInstalledException}
+     * (500) — Rod's binding distinction — when the operation declares scopes but the host wired no
+     * auth chain to enforce them: a server misconfiguration, deliberately NOT a 401/403.
+     */
+    private function enforceScopes(Operation $op, ServerRequestInterface $request): ?ResponseInterface
+    {
+        if (!$this->authChainInstalled()) {
+            throw AuthMiddlewareNotInstalledException::forScopedOperation($op->name, $op->scopes);
+        }
+
+        // The fail-closed scope gate. RequireScopeMiddleware reads the AuthContext an upstream
+        // AuthenticateMiddleware/StartSession attached under 'milpa.auth' and throws the typed,
+        // learnable denial; the sentinel handler runs only when it admits the request.
+        $guard = new RequireScopeMiddleware(...$op->scopes);
+        try {
+            $guard->process($request, new class () implements RequestHandlerInterface {
+                public function handle(ServerRequestInterface $request): ResponseInterface
+                {
+                    return new Response(204);
+                }
+            });
+        } catch (AuthContextMissingException | ScopeDeniedException $e) {
+            return $this->json($e->statusCode(), ['error' => $e->getMessage(), 'code' => $e->errorCode()]);
+        }
+
+        // Authorized. The context stops lying: run the atom through the same policy layer MCP uses,
+        // with the honest ToolContext::web (real principal + real scopes). Opt-in — only when the
+        // agent-ready surface (milpa/tool-runtime) is installed.
+        return $this->enforceWebPolicy($op, $request);
+    }
+
+    /**
+     * Whether the host wired an auth chain able to produce a verified {@see AuthContext} — i.e. a
+     * {@see CredentialVerifier} or {@see AuthContextFactory} is resolvable in the container. When
+     * neither is, a scope-declaring operation cannot be honestly enforced, which is a host
+     * configuration error (500), not a request failure.
+     */
+    private function authChainInstalled(): bool
+    {
+        return $this->container->has(CredentialVerifier::class)
+            || $this->container->has(AuthContextFactory::class);
+    }
+
+    /**
+     * Defense in depth for an already-authorized request: rebuilds the honest {@see ToolContext::web()}
+     * from the request's verified actor and runs the atom through the same {@see PolicyGate} that
+     * guards the MCP surface, so the HTTP atom is subject to the identical policy layer. Opt-in: a
+     * no-op (returns `null`) unless milpa/tool-runtime is installed. Returns a 403 JSON response if
+     * the gate denies, or `null` to proceed.
+     */
+    private function enforceWebPolicy(Operation $op, ServerRequestInterface $request): ?ResponseInterface
+    {
+        if (!class_exists(ToolContext::class) || !class_exists(PolicyGate::class)) {
+            return null;
+        }
+
+        $context = $request->getAttribute(AuthenticateMiddleware::ATTRIBUTE);
+        if (!$context instanceof AuthContext || $context->actor === null) {
+            return null; // unreachable once the scope gate above admitted the request; fail-safe
+        }
+
+        $decision = (new PolicyGate())->authorize(
+            ToolContext::web($context->actor->id, $context->actor->scopes),
+            new ToolDefinition(
+                name: $op->name,
+                description: $op->description,
+                inputSchema: $op->inputSchema ?? [],
+                callback: static fn (): null => null,
+                scopes: $op->scopes,
+                mutating: $op->mutating,
+                requiresConfirmation: $op->requiresConfirmation,
+            ),
+        );
+
+        if (!$decision->allowed) {
+            return $this->json(403, ['error' => $decision->reason, 'code' => 'MILPA_SCOPE_DENIED']);
+        }
+
+        return null;
     }
 
     /**

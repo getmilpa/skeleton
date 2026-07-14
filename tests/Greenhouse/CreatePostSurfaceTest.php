@@ -7,6 +7,12 @@ namespace App\Tests\Greenhouse;
 use App\Command\CliProjector;
 use App\Command\HttpProjector;
 use App\Command\McpProjector;
+use Milpa\Auth\Actor;
+use Milpa\Auth\ActorType;
+use Milpa\Auth\AuthContext;
+use Milpa\Auth\Contracts\CredentialVerifier;
+use Milpa\Auth\Credential;
+use Milpa\Auth\Http\AuthenticateMiddleware;
 use Milpa\Interfaces\Tooling\ToolRegistryInterface;
 use Milpa\Runtime\Kernel;
 use Milpa\ValueObjects\Tooling\ToolOptions;
@@ -69,12 +75,25 @@ final class CreatePostSurfaceTest extends TestCase
     public function testHttpSurfaceCreatesAPostThroughTheConfirmGate(): void
     {
         $kernel = $this->bootKernel();
+
+        // create_post declares scopes: ['posts:write'] — HTTP now ENFORCES them (the Artifact 09
+        // hole is closed). So the host wires an auth chain (a CredentialVerifier) and the request
+        // carries a verified actor holding the scope, exactly as an AuthenticateMiddleware would.
+        $kernel->container()->registerService(CredentialVerifier::class, new class () implements CredentialVerifier {
+            public function verify(Credential $credential): AuthContext
+            {
+                return AuthContext::anonymous();
+            }
+        });
+
         /** @var HttpProjector $projector */
         $projector = $kernel->container()->get(HttpProjector::class);
 
         $route = $projector->routes()[0];
+        $actor = new Actor('tester', ActorType::User, ['posts:write']);
         $make = static fn (): ServerRequest => (new ServerRequest('POST', '/posts', ['Content-Type' => 'application/json'], '{"title":"Hi","body":"Yo"}'))
-            ->withAttribute(\Milpa\Http\Routing\RouteResult::ATTRIBUTE, \Milpa\Http\Routing\RouteResult::matched($route));
+            ->withAttribute(\Milpa\Http\Routing\RouteResult::ATTRIBUTE, \Milpa\Http\Routing\RouteResult::matched($route))
+            ->withAttribute(AuthenticateMiddleware::ATTRIBUTE, AuthContext::authenticated($actor));
 
         $first = $projector->handle($make());
         self::assertSame(428, $first->getStatusCode());

@@ -3,16 +3,15 @@ parameters:
     paths:
         - src
         - public
-    # Agent-ready is OPT-IN: milpa/tool-runtime is suggest-only, so the BASE install this
-    # analysis runs against does not ship Milpa\ToolRuntime\ToolRegistry — the class is
-    # unknown here by design, not by accident. The code guards every use at runtime
-    # (class_exists() before constructing, instanceof before narrowing) and inspect:tools
-    # degrades to teaching the opt-in command instead of failing. Scoped to the one file
-    # and the one class so any OTHER missing symbol still fails the analysis.
+    # Agent-ready is OPT-IN: milpa/tool-runtime is a require-dev/opt-in dependency of this
+    # skeleton (HttpProjector's scope enforcement needs it, and the test + analysis toolchain
+    # ship it), but a PRODUCTION `--no-dev` install does not — so every runtime use is guarded
+    # by class_exists()/instanceof and degrades cleanly when the package is absent. Analysis DOES
+    # see the concrete classes (dev deps installed), so the only residual note is the defensive
+    # instanceof below: it proves at runtime that a host-installed tool-runtime's registry still
+    # implements core's interface, which phpstan reads as always-true against the pinned version
+    # but which still guards a different version at production runtime. Scoped to the one line.
     ignoreErrors:
         -
-            message: '#^Class Milpa\\ToolRuntime\\ToolRegistry not found\.$#'
-            path: src/Console/Application.php
-        -
-            message: '#^Call to method getToolSummaries\(\) on an unknown class Milpa\\ToolRuntime\\ToolRegistry\.$#'
+            message: '#^Instanceof between Milpa\\ToolRuntime\\ToolRegistry and Milpa\\Interfaces\\Tooling\\ToolRegistryInterface will always evaluate to true\.$#'
             path: src/Console/Application.php

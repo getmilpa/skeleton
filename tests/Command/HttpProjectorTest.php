@@ -14,6 +14,9 @@ use PHPUnit\Framework\TestCase;
 
 final class HttpProjectorTest extends TestCase
 {
+    // Unscoped on purpose: these cases exercise the confirm gate + coercion in isolation, which is
+    // the byte-identical empty-scope path. Scope enforcement (the closed Artifact 09 hole) has its
+    // own dedicated fixture and suite in HttpProjectorScopeEnforcementTest.
     private function createPostOperation(): Operation
     {
         return new Operation(
@@ -26,7 +29,6 @@ final class HttpProjectorTest extends TestCase
             ], 'required' => ['title', 'body']],
             mutating: true,
             requiresConfirmation: true,
-            scopes: ['posts:write'],
             path: '/posts',
         );
     }
