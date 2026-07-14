@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.4](https://github.com/getmilpa/skeleton/compare/v0.6.3...v0.6.4) (2026-07-14)
+
+
+### Bug Fixes
+
+* receive the data roots — pins milpa/data ^0.2 and milpa/devtools ^0.6 ([42b71bd](https://github.com/getmilpa/skeleton/commit/42b71bdae55b81893544fc3c5417bed159df87a9))
+
 ## [0.6.3](https://github.com/getmilpa/skeleton/compare/v0.6.2...v0.6.3) (2026-07-13)
 
 
