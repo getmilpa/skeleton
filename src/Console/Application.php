@@ -21,6 +21,9 @@ use Milpa\Command\Operation;
 use Milpa\Container\DIContainer;
 use Milpa\DevTools\Make\GenerationContext;
 use Milpa\DevTools\Make\GenerationResult;
+use Milpa\DevTools\Make\MarkerInserter;
+use Milpa\DevTools\Make\Markers;
+use Milpa\DevTools\Make\PlannedFile;
 use Milpa\DevTools\Make\Generators\ControllerGenerator;
 use Milpa\DevTools\Make\Generators\CrudGenerator;
 use Milpa\DevTools\Make\Generators\EntityGenerator;
@@ -29,6 +32,7 @@ use Milpa\DevTools\Make\Generators\ServiceGenerator;
 use Milpa\DevTools\Make\Generators\ToolGenerator;
 use Milpa\DevTools\Make\VerifyRunner;
 use Milpa\DevTools\Make\WriteGuard;
+use Milpa\DevTools\Support\ComposerAutoload;
 use Milpa\Exceptions\AttributeNotFoundException;
 use Milpa\Exceptions\Plugin\PluginDependencyException;
 use Milpa\Http\HttpMethod;
@@ -249,7 +253,7 @@ final class Application
     private function makeController(array $args): int
     {
         if (\count($args) < 2) {
-            $this->line('usage: coa make:controller <PluginName> <ControllerName> [--path=/route] [--flavor=runtime|legacy] [--force]');
+            $this->line('usage: coa make:controller <PluginName> <ControllerName> [--path=/route] [--flavor=runtime|legacy] [--register] [--force]');
 
             return 1;
         }
@@ -262,7 +266,7 @@ final class Application
         // and an App\ PSR-4 root with no milpa.json, so ConventionDetector selects the RUNTIME flavor
         // — a plain PSR-7 controller plus a booting RouteProviderInterface plugin — with no --flavor.
         $context = new GenerationContext(plugin: $plugin, name: $name, options: $options, root: $this->root);
-        $result = (new ControllerGenerator())->generate($context);
+        $result = $this->withoutOnlyWrittenContainerProperty((new ControllerGenerator())->generate($context));
 
         $guard = new WriteGuard();
         foreach ($result->files as $file) {
@@ -286,6 +290,10 @@ final class Application
             $this->line('');
             $this->line($result->guidance);
         }
+        if (isset($options['register']) && $this->registerPlugin($plugin)) {
+            $this->line('');
+            $this->line('✔ registered ' . $this->pluginFqcn($plugin) . ' in config/plugins.php.');
+        }
 
         return 0;
     }
@@ -294,7 +302,7 @@ final class Application
     private function makeEntity(array $args): int
     {
         if (\count($args) < 2) {
-            $this->line('usage: coa make:entity <PluginName> <EntityName> [--fields="name:type[:mods],..."] [--table=name] [--flavor=runtime|legacy] [--force]');
+            $this->line('usage: coa make:entity <PluginName> <EntityName> [--fields="name:type[:mods],..."] [--table=name] [--flavor=runtime|legacy] [--wire] [--register] [--force]');
 
             return 1;
         }
@@ -322,9 +330,16 @@ final class Application
         // The one manual step the generator cannot do deterministically — registering a freshly
         // generated plugin in config/plugins.php, or the FileRepository snippet to add to an
         // existing one. Surface it verbatim so the scaffolded entity actually reaches persistence.
-        if ($result->guidance !== null) {
+        if (isset($options['wire'])) {
+            $this->line('');
+            $this->line($this->wireEntityIntoExistingPlugin($plugin, $name, $options, $force));
+        } elseif ($result->guidance !== null) {
             $this->line('');
             $this->line($result->guidance);
+        }
+        if (isset($options['register']) && $this->registerPlugin($plugin)) {
+            $this->line('');
+            $this->line('✔ registered ' . $this->pluginFqcn($plugin) . ' in config/plugins.php.');
         }
 
         // Unlike make:controller, the verify step IS wired here: EntityVerifier::verifyRuntime()
@@ -418,7 +433,7 @@ final class Application
     private function makeCrud(array $args): int
     {
         if (\count($args) < 2) {
-            $this->line('usage: coa make:crud <Plugin> <Entity> [--fields="name:type[:mods],..."] [--table=name] [--flavor=runtime|legacy] [--force]');
+            $this->line('usage: coa make:crud <Plugin> <Entity> [--fields="name:type[:mods],..."] [--table=name] [--flavor=runtime|legacy] [--register] [--force]');
 
             return 1;
         }
@@ -428,7 +443,7 @@ final class Application
         $force = isset($options['force']);
 
         $context = new GenerationContext(plugin: $plugin, name: $name, options: $options, root: $this->root);
-        $result = (new CrudGenerator())->generate($context);
+        $result = $this->cleanCrudGuidance((new CrudGenerator())->generate($context));
 
         // Unlike make:tool, CrudGenerator DOES set verifyKind ('controller', pointed at the
         // generated {Entity}Controller — see its class docblock's Fricciones #1). writeAndReport()
@@ -437,7 +452,13 @@ final class Application
         // only touches the legacy BaseController check behind a class_exists() short-circuit — it
         // never throws when that legacy class is absent, so nothing here re-triggers the landmine
         // makeController()'s docblock warns about.
-        return $this->writeAndReport($result, $force);
+        $exit = $this->writeAndReport($result, $force);
+        if ($exit === 0 && isset($options['register']) && $this->registerPlugin($plugin)) {
+            $this->line('');
+            $this->line('✔ registered ' . $this->pluginFqcn($plugin) . ' in config/plugins.php.');
+        }
+
+        return $exit;
     }
 
     /**
@@ -472,6 +493,134 @@ final class Application
         }
 
         return 0;
+    }
+
+    /**
+     * @param GenerationResult $result
+     */
+    private function withoutOnlyWrittenContainerProperty(GenerationResult $result): GenerationResult
+    {
+        $files = array_map(function (PlannedFile $file): PlannedFile {
+            $contents = str_replace(
+                'public function __construct(private readonly DIContainerInterface $container)',
+                'public function __construct(DIContainerInterface $container)',
+                $file->contents,
+            );
+            $contents = str_replace(
+                '        // property so a future boot() can read config/services from it, even though this',
+                '        // value is intentionally not stored until boot() actually needs it, so this',
+                $contents,
+            );
+            $contents = str_replace(
+                '        // scaffolded plugin has nothing to boot yet.',
+                '        // scaffolded plugin stays PHPStan-clean when boot() has nothing to do yet.',
+                $contents,
+            );
+
+            return $contents === $file->contents ? $file : new PlannedFile($file->path, $contents, $file->merge);
+        }, $result->files);
+
+        return new GenerationResult(
+            files: $files,
+            verifyKind: $result->verifyKind,
+            verifyTarget: $result->verifyTarget,
+            flavor: $result->flavor,
+            guidance: $result->guidance,
+        );
+    }
+
+    private function cleanCrudGuidance(GenerationResult $result): GenerationResult
+    {
+        $guidance = $result->guidance;
+        if ($guidance !== null && str_contains($guidance, 'Controller/route wiring:')) {
+            $parts = explode("\n\nController/route wiring:\n", $guidance, 2);
+            $guidance = $parts[1] ?? $guidance;
+        }
+
+        return new GenerationResult(
+            files: $result->files,
+            verifyKind: $result->verifyKind,
+            verifyTarget: $result->verifyTarget,
+            flavor: $result->flavor,
+            guidance: $guidance,
+        );
+    }
+
+    /** @param array<string, string> $options */
+    private function wireEntityIntoExistingPlugin(string $plugin, string $entity, array $options, bool $force): string
+    {
+        [$appNamespace, $appDir] = ComposerAutoload::primaryNamespace($this->root) ?? ['App', 'src'];
+        $appDir = trim($appDir, '/');
+        $pluginPath = $this->root . '/' . $appDir . '/Plugins/' . $plugin . '/' . $plugin . '.php';
+        if (!is_file($pluginPath)) {
+            return 'wire skipped — no existing plugin file found; the entity generator already created the repository plugin.';
+        }
+
+        $existing = (string) file_get_contents($pluginPath);
+        $markers = new MarkerInserter();
+        if (!$markers->hasMarker($existing, Markers::SERVICES)) {
+            return 'wire skipped — existing plugin has no // {' . Markers::SERVICES . '} marker. I will not rewrite arbitrary PHP; add the printed snippet by hand or add the marker where service registrations belong.';
+        }
+
+        $table = $options['table'] ?? strtolower($entity) . 's';
+        $entityFqcn = $appNamespace . '\\Plugins\\' . $plugin . '\\Entities\\' . $entity;
+        $snippet = "\$storage = \$this->container->get(\\Milpa\\Runtime\\Config::class)->get('storage', [\n"
+            . "    'driver' => 'file',\n"
+            . "    'path' => (new \\Milpa\\Runtime\\Support\\RootResolver())->resolve() . '/var/{$table}.json',\n"
+            . "]);\n"
+            . "\\assert(\\is_array(\$storage));\n\n"
+            . "\$this->container->registerService(\n"
+            . "    \\{$entityFqcn}::class . 'Repository',\n"
+            . "    \\Milpa\\Data\\RepositoryFactory::fromConfig(\$storage, \\{$entityFqcn}::class),\n"
+            . ');';
+
+        $merged = $markers->insertBefore($existing, Markers::SERVICES, $snippet, $force);
+        file_put_contents($pluginPath, $merged);
+
+        return '✔ wired ' . $entityFqcn . ' repository into the existing plugin at // {' . Markers::SERVICES . '}. Honest note: --wire is a convenience splice, not a design review; check whether this plugin is really the right composition boundary.';
+    }
+
+    private function registerPlugin(string $plugin): bool
+    {
+        $path = $this->root . '/config/plugins.php';
+        if (!is_file($path)) {
+            return false;
+        }
+
+        $fqcn = $this->pluginFqcn($plugin);
+        $short = $plugin;
+        $contents = (string) file_get_contents($path);
+        if (str_contains($contents, $short . '::class')) {
+            return false;
+        }
+
+        $useLine = 'use ' . $fqcn . ';';
+        if (!str_contains($contents, $useLine)) {
+            $useCount = preg_match_all('/^use .*;$/m', $contents, $matches, PREG_OFFSET_CAPTURE);
+            if ($useCount !== false && $useCount > 0) {
+                $last = end($matches[0]);
+                $pos = $last[1] + strlen($last[0]);
+                $contents = substr($contents, 0, $pos) . "\n" . $useLine . substr($contents, $pos);
+            } else {
+                $contents = preg_replace('/(declare\(strict_types=1\);\n)/', "$1\n" . $useLine . "\n", $contents, 1) ?? $contents;
+            }
+        }
+
+        $updated = preg_replace('/(return\s*\[\s*\n)/', "$1    {$short}::class,\n", $contents, 1);
+        if ($updated === null || $updated === $contents) {
+            return false;
+        }
+
+        file_put_contents($path, $updated);
+
+        return true;
+    }
+
+    private function pluginFqcn(string $plugin): string
+    {
+        [$appNamespace] = ComposerAutoload::primaryNamespace($this->root) ?? ['App', 'src'];
+
+        return $appNamespace . '\\Plugins\\' . $plugin . '\\' . $plugin;
     }
 
     /**
@@ -989,12 +1138,12 @@ final class Application
         $this->line('  coa inspect:commands                           list built-in + plugin-discovered coa commands');
         $this->line('  coa agent:enable                               opt in to agent-ready (composer require tool-runtime + mcp-server)');
         $this->line('');
-        $this->line('  opts for make:controller: --path=/route  --flavor=runtime|legacy  --force');
-        $this->line('  opts for make:entity:     --fields="name:type[:mods],..."  --table=name  --flavor=runtime|legacy  --force');
+        $this->line('  opts for make:controller: --path=/route  --flavor=runtime|legacy  --register  --force');
+        $this->line('  opts for make:entity:     --fields="name:type[:mods],..."  --table=name  --flavor=runtime|legacy  --wire  --register  --force');
         $this->line('  opts for make:plugin:     --provides=cap1,cap2  --requires=cap3  --flavor=runtime|legacy  --force');
         $this->line('  opts for make:service:    --interface  --flavor=runtime|legacy  --force');
         $this->line('  opts for make:tool:       --description=text  --tool-name=snake_name  --flavor=runtime|legacy  --force');
-        $this->line('  opts for make:crud:       --fields="name:type[:mods],..."  --table=name  --flavor=runtime|legacy  --force');
+        $this->line('  opts for make:crud:       --fields="name:type[:mods],..."  --table=name  --flavor=runtime|legacy  --register  --force');
         $this->line('');
         $this->line('  Any other <name> is looked up in the discovered command table (a booted');
         $this->line('  CommandProviderInterface plugin\'s commands()) and run if found — see `coa inspect:commands`.');

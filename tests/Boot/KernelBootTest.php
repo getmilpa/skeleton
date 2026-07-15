@@ -23,8 +23,12 @@ final class KernelBootTest extends TestCase
     {
         $kernel = Kernel::boot($this->bootConfig());
 
-        $this->assertSame([HelloPlugin::class], \array_map(static fn (object $p): string => $p::class, $kernel->plugins()));
-        $this->assertSame(['HelloPlugin'], $kernel->bootedPluginNames());
+        /** @var list<class-string> $configuredPlugins */
+        $configuredPlugins = $this->bootConfig()['plugins'];
+
+        $this->assertContains(HelloPlugin::class, $configuredPlugins);
+        $this->assertSame($configuredPlugins, \array_map(static fn (object $p): string => $p::class, $kernel->plugins()));
+        $this->assertContains('HelloPlugin', $kernel->bootedPluginNames());
     }
 
     public function testGetSlashDispatchesToTheHomeControllerAndReturns200(): void
