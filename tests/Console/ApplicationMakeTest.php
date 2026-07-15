@@ -102,8 +102,8 @@ PHP;
 
         $plugin = file_get_contents($this->root . '/src/Plugins/ReviewPlugin/ReviewPlugin.php');
         $this->assertIsString($plugin);
-        $this->assertStringContainsString('public function __construct(DIContainerInterface $container)', $plugin);
-        $this->assertStringNotContainsString('private readonly DIContainerInterface $container', $plugin);
+        $this->assertStringContainsString('private readonly DIContainerInterface $container', $plugin);
+        $this->assertStringContainsString('registerService(ReviewController::class, new ReviewController())', $plugin);
     }
 
     public function testMakeEntityCanWireRepositoryIntoAnExistingMarkedPluginWhenExplicitlyRequested(): void

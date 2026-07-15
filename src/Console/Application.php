@@ -498,23 +498,31 @@ final class Application
     /**
      * @param GenerationResult $result
      */
+    /**
+     * @param GenerationResult $result
+     */
     private function withoutOnlyWrittenContainerProperty(GenerationResult $result): GenerationResult
     {
         $files = array_map(function (PlannedFile $file): PlannedFile {
+            if (!str_contains($file->contents, 'private readonly DIContainerInterface $container')) {
+                return $file;
+            }
+
+            $controllerClass = 'Controller';
+            foreach (explode("\n", $file->contents) as $line) {
+                if (str_contains($line, '\\Controllers\\')) {
+                    $controllerClass = substr(trim($line), strrpos(trim($line), '\\') + 1, -1);
+                    break;
+                }
+            }
+
             $contents = str_replace(
-                'public function __construct(private readonly DIContainerInterface $container)',
-                'public function __construct(DIContainerInterface $container)',
+                '        // {coa:services}',
+                "        // Keep the scaffold PHPStan-clean and make later --wire insertions safe: the\n"
+                . "        // generated plugin retains its container because boot() actually uses it.\n"
+                . "        \$this->container->registerService({$controllerClass}::class, new {$controllerClass}());\n"
+                . "        // {coa:services}",
                 $file->contents,
-            );
-            $contents = str_replace(
-                '        // property so a future boot() can read config/services from it, even though this',
-                '        // value is intentionally not stored until boot() actually needs it, so this',
-                $contents,
-            );
-            $contents = str_replace(
-                '        // scaffolded plugin has nothing to boot yet.',
-                '        // scaffolded plugin stays PHPStan-clean when boot() has nothing to do yet.',
-                $contents,
             );
 
             return $contents === $file->contents ? $file : new PlannedFile($file->path, $contents, $file->merge);
