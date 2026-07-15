@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/getmilpa/skeleton/compare/v0.7.0...v0.8.0) (2026-07-15)
+
+
+### Features
+
+* **coa:** smooth generator registration dx ([#14](https://github.com/getmilpa/skeleton/issues/14)) ([bf2fcce](https://github.com/getmilpa/skeleton/commit/bf2fcce46911f56ee7b7ade6379929896a2605c6))
+
 ## [0.7.0](https://github.com/getmilpa/skeleton/compare/v0.6.4...v0.7.0) (2026-07-14)
 
 
