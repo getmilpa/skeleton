@@ -141,12 +141,12 @@ for an agent driving the CLI, not just a human:
 ```bash
 php bin/coa doctor                                        # boot the kernel, report what came up
 php bin/coa validate                                      # static capability check, no boot()
-php bin/coa make:controller PingPlugin PingController --path=/ping
-php bin/coa make:entity BoardPlugin Task --fields="title:string:200,done:bool"
+php bin/coa make:controller PingPlugin PingController --path=/ping --register
+php bin/coa make:entity BoardPlugin Task --fields="title:string:200,done:bool" --wire
 php bin/coa make:plugin BoardPlugin --provides=board.capability
 php bin/coa make:service BoardPlugin WorkflowService --interface
 php bin/coa make:tool BoardPlugin CompleteTaskTool --description="Mark a task done"
-php bin/coa make:crud BoardPlugin Task --fields="title:string:200,status:string:20"
+php bin/coa make:crud BoardPlugin Task --fields="title:string:200,status:string:20" --register
 php bin/coa inspect:plugins                               # booted plugins + their capability graph
 php bin/coa inspect:routes                                # the booted route table
 php bin/coa inspect:services                               # what the DI container has registered
@@ -161,18 +161,22 @@ has `config/plugins.php` and an `App\` PSR-4 root with no `milpa.json`, so it pi
 flavor with no flag and writes exactly this skeleton's `App\Plugins\*` + `RouteProviderInterface`
 pattern — a plain PSR-7 controller (`index(ServerRequestInterface): ResponseInterface`, no base
 class, no `#[Route]`) plus a minimal `RouteProviderInterface` plugin wiring `GET <path> →
-Controller::index`. The command then prints the one manual step it can't do deterministically:
-add the generated plugin's `::class` to `config/plugins.php`. Do that, reload, and the new route
-serves a real response. Pass `--flavor=legacy` to force the old `Milpa\Plugins\*` +
-`BaseController` host convention instead; `--path=/route` sets the route path.
+Controller::index`. By default the command prints the registration step so you can review the app
+boundary yourself; pass `--register` when you want `coa` to add the generated plugin class to
+`config/plugins.php` for you. Do that, reload, and the new route serves a real response. Pass
+`--flavor=legacy` to force the old `Milpa\Plugins\*` + `BaseController` host convention instead;
+`--path=/route` sets the route path.
 
 The same `Generator` + `WriteGuard` engine backs `make:entity` (a persisting domain model +
 `FileRepository`), `make:plugin` (a standalone composition unit), `make:service` (a DI-registered
 domain service, optionally with a companion interface via `--interface`), `make:tool` (a
 `#[Tool]`-attributed AI-callable method — requires `composer require milpa/tool-runtime` in your
 own project to actually load), and `make:crud` (entity + a 5-method REST controller + routes +
-wiring plugin, composed from `make:entity` plus a new controller shape). Run `php bin/coa` with no
-arguments for the full command/option reference. The `inspect:*` commands boot the real kernel and
+wiring plugin, composed from `make:entity` plus a new controller shape). `make:entity --wire` is an
+explicit convenience splice for an existing plugin that carries the `// {coa:services}` marker: it
+inserts the repository registration for you, but it is intentionally honest that this is not a
+design review — check whether that plugin is really the right composition boundary. Run `php bin/coa`
+with no arguments for the full command/option reference. The `inspect:*` commands boot the real kernel and
 report what they find — `inspect:services` reaches into the concrete
 `Symfony\Component\DependencyInjection\ContainerBuilder` under `Milpa\Container\DIContainer` (the
 DI contract itself exposes no enumeration method), and `inspect:routes` reconstructs the route
