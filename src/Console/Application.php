@@ -266,7 +266,7 @@ final class Application
         // and an App\ PSR-4 root with no milpa.json, so ConventionDetector selects the RUNTIME flavor
         // — a plain PSR-7 controller plus a booting RouteProviderInterface plugin — with no --flavor.
         $context = new GenerationContext(plugin: $plugin, name: $name, options: $options, root: $this->root);
-        $result = $this->withoutOnlyWrittenContainerProperty((new ControllerGenerator())->generate($context));
+        $result = $this->withControllerServiceRegistration((new ControllerGenerator())->generate($context));
 
         $guard = new WriteGuard();
         foreach ($result->files as $file) {
@@ -495,13 +495,8 @@ final class Application
         return 0;
     }
 
-    /**
-     * @param GenerationResult $result
-     */
-    /**
-     * @param GenerationResult $result
-     */
-    private function withoutOnlyWrittenContainerProperty(GenerationResult $result): GenerationResult
+    /** @param GenerationResult $result */
+    private function withControllerServiceRegistration(GenerationResult $result): GenerationResult
     {
         $files = array_map(function (PlannedFile $file): PlannedFile {
             if (!str_contains($file->contents, 'private readonly DIContainerInterface $container')) {
@@ -523,6 +518,16 @@ final class Application
                 . "        \$this->container->registerService({$controllerClass}::class, new {$controllerClass}());\n"
                 . "        // {coa:services}",
                 $file->contents,
+            );
+            $contents = str_replace(
+                '        // property so a future boot() can read config/services from it, even though this',
+                '        // property because boot() registers the generated controller and future --wire',
+                $contents,
+            );
+            $contents = str_replace(
+                '        // scaffolded plugin has nothing to boot yet.',
+                '        // insertions may register additional generated services here.',
+                $contents,
             );
 
             return $contents === $file->contents ? $file : new PlannedFile($file->path, $contents, $file->merge);

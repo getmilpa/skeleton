@@ -90,7 +90,7 @@ PHP;
         parent::tearDown();
     }
 
-    public function testMakeControllerCanRegisterTheGeneratedPluginAndAvoidsOnlyWrittenContainerProperty(): void
+    public function testMakeControllerCanRegisterTheGeneratedPluginAndKeepContainerUseful(): void
     {
         $exit = $this->runCoa('make:controller', 'ReviewPlugin', 'ReviewController', '--path=/review', '--register');
 
@@ -104,6 +104,7 @@ PHP;
         $this->assertIsString($plugin);
         $this->assertStringContainsString('private readonly DIContainerInterface $container', $plugin);
         $this->assertStringContainsString('registerService(ReviewController::class, new ReviewController())', $plugin);
+        $this->assertStringContainsString('boot() registers the generated controller', $plugin);
     }
 
     public function testMakeEntityCanWireRepositoryIntoAnExistingMarkedPluginWhenExplicitlyRequested(): void
