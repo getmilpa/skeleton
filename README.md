@@ -31,14 +31,29 @@ php -S localhost:8000 -t public
 
 Open `http://localhost:8000` — you'll see "Milpa is running", served by
 `App\Plugins\HelloPlugin\Controllers\HomeController` through `Milpa\Runtime\Http\RequestHandler`.
+The page points at the same first-five-minutes loop the CLI can print for you:
 
-Then check the CLI:
+```bash
+php bin/coa wow
+```
+
+## The first-five-minutes path
+
+Milpa's skeleton is intentionally small, but it is not a blind hello world. The "wow" is the closed
+evidence loop: **create → inspect → extend → validate → expose to agents**.
+
+Start by asking the app what actually booted:
 
 ```bash
 php bin/coa doctor
+php bin/coa inspect:routes
+php bin/coa inspect:commands
 ```
 
-```
+`doctor` should report the stock app's single plugin, single route, config value, and zero database
+queries:
+
+```text
 milpa · coa doctor
 root: /path/to/myapp
 ✔ 1 plugin(s) configured, 1 booted: HelloPlugin
@@ -48,6 +63,36 @@ root: /path/to/myapp
 ✔ config: app.greeting = 'Milpa is running.'
 ✔ kernel booted — zero database queries.
 ```
+
+Now make the smallest visible change and inspect it before trusting it:
+
+```bash
+php bin/coa make:controller DemoPlugin DemoController --path=/demo --register
+php bin/coa inspect:routes
+php bin/coa validate
+```
+
+Serve the app and hit the new route:
+
+```bash
+php -S localhost:8000 -t public
+curl http://localhost:8000/demo
+```
+
+When you want the agent surface, opt in explicitly:
+
+```bash
+php bin/coa agent:enable
+php bin/coa inspect:tools
+printf '%s\n' \
+'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+'{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+| php bin/mcp-server.php
+```
+
+A stock app has no tools yet; that is honest. The point is that the app can now expose whatever
+`#[Tool]` methods its booted plugins register, and both humans and agents can list that surface
+before calling it.
 
 ## What's in here
 

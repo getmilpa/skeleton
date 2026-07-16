@@ -157,8 +157,60 @@ final class Application
             'inspect:tools' => $this->inspectTools(),
             'inspect:commands' => $this->inspectCommands(),
             'agent:enable' => $this->agentEnable(),
+            'wow' => $this->wow(),
             default => $this->runDiscoveredCommand($command, $args),
         };
+    }
+
+    private function wow(): int
+    {
+        $kernel = $this->bootKernelForInspect();
+        if ($kernel === null) {
+            return 1;
+        }
+
+        $routeCount = 0;
+        foreach ($kernel->plugins() as $plugin) {
+            if ($plugin instanceof RouteProviderInterface) {
+                $routeCount += \count($plugin->routes());
+            }
+        }
+
+        $registry = $kernel->toolRegistry();
+        $agentReady = $registry instanceof ToolRegistry;
+        $toolCount = 0;
+        if ($agentReady) {
+            (new McpProjector())->project($kernel->commands(), $registry, $kernel->container());
+            $toolCount = \count($registry->getToolSummaries());
+        }
+
+        $this->line('milpa · coa wow — the first five minutes');
+        $this->line('');
+        $this->line('This app is small on purpose, but it can explain itself:');
+        $this->line(\sprintf('  ✔ %d plugin(s) booted: %s', \count($kernel->bootedPluginNames()), implode(', ', $kernel->bootedPluginNames())));
+        $this->line(\sprintf('  ✔ %d route(s) inspectable through `php bin/coa inspect:routes`', $routeCount));
+        $this->line(\sprintf(
+            '  ✔ agent-ready: %s%s',
+            $agentReady ? 'enabled' : 'off by default',
+            $agentReady ? " ({$toolCount} tool(s) visible)" : ' — run `php bin/coa agent:enable` when you want MCP/tools',
+        ));
+        $this->line('');
+        $this->line('Try this path:');
+        $this->line('  1. php bin/coa doctor');
+        $this->line('  2. php bin/coa inspect:routes');
+        $this->line('  3. php bin/coa make:controller DemoPlugin DemoController --path=/demo --register');
+        $this->line('  4. php bin/coa inspect:routes');
+        $this->line('  5. php -S localhost:8000 -t public');
+        $this->line('  6. curl http://localhost:8000/demo');
+        $this->line('');
+        $this->line('When you want the agent surface:');
+        $this->line('  7. php bin/coa agent:enable');
+        $this->line('  8. php bin/coa inspect:tools');
+        $this->line('  9. php bin/mcp-server.php');
+        $this->line('');
+        $this->line('The point: create → inspect → extend → validate → expose to agents.');
+
+        return 0;
     }
 
     private function doctor(): int
@@ -1129,6 +1181,7 @@ final class Application
             'inspect:tools' => 'list registered #[Tool]s (or "no tool registry")',
             'inspect:commands' => 'list built-in + plugin-discovered coa commands',
             'agent:enable' => 'opt in to the agent-ready surface (composer require tool-runtime + mcp-server)',
+            'wow' => 'show the first-five-minutes path through the skeleton',
         ];
     }
 
@@ -1150,6 +1203,7 @@ final class Application
         $this->line('  coa inspect:tools                              list registered #[Tool]s (or "no tool registry")');
         $this->line('  coa inspect:commands                           list built-in + plugin-discovered coa commands');
         $this->line('  coa agent:enable                               opt in to agent-ready (composer require tool-runtime + mcp-server)');
+        $this->line('  coa wow                                        show the first-five-minutes path');
         $this->line('');
         $this->line('  opts for make:controller: --path=/route  --flavor=runtime|legacy  --register  --force');
         $this->line('  opts for make:entity:     --fields="name:type[:mods],..."  --table=name  --flavor=runtime|legacy  --wire  --register  --force');
