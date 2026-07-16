@@ -52,9 +52,11 @@ final class HomeController
                 <meta name="viewport" content="width=device-width, initial-scale=1">
                 <style>
                     body { font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-                           max-width: 40rem; margin: 4rem auto; padding: 0 1.5rem; color: #1a1a1a; }
+                           max-width: 46rem; margin: 4rem auto; padding: 0 1.5rem; color: #1a1a1a; }
                     code { background: #f2f2f2; padding: 0.15em 0.4em; border-radius: 4px; }
+                    pre { background: #111827; color: #f9fafb; padding: 1rem; border-radius: 10px; overflow-x: auto; }
                     h1 { font-size: 1.5rem; }
+                    .next { border: 1px solid #e5e7eb; border-radius: 12px; padding: 1rem; background: #fafafa; }
                 </style>
             </head>
             <body>
@@ -65,8 +67,15 @@ final class HomeController
                 <p>The heading above came from <code>config/app.php</code>
                    (<code>app.greeting</code>), read by <code>HelloPlugin::boot()</code> through
                    <code>Milpa\Runtime\Config</code> — edit it and reload.</p>
-                <p>Edit <code>config/plugins.php</code> to add your own plugin, or run
-                   <code>php bin/coa doctor</code> to see what's booted.</p>
+                <section class="next" aria-labelledby="next-steps">
+                    <h2 id="next-steps">Your first five minutes</h2>
+                    <p>Do not guess what booted. Ask the app:</p>
+                    <pre><code>php bin/coa wow&#10;php bin/coa doctor&#10;php bin/coa inspect:routes</code></pre>
+                    <p>Then make the smallest visible change and inspect it:</p>
+                    <pre><code>php bin/coa make:controller DemoPlugin DemoController --path=/demo --register&#10;php bin/coa inspect:routes</code></pre>
+                    <p>When you want tools for agents, opt in explicitly:</p>
+                    <pre><code>php bin/coa agent:enable&#10;php bin/coa inspect:tools</code></pre>
+                </section>
             </body>
             </html>
             HTML);

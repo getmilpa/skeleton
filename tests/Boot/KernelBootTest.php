@@ -39,7 +39,12 @@ final class KernelBootTest extends TestCase
         $response = $handler->handle(new ServerRequest('GET', '/'));
 
         $this->assertSame(200, $response->getStatusCode());
-        $this->assertStringContainsString('Milpa is running', (string) $response->getBody());
+        $body = (string) $response->getBody();
+
+        $this->assertStringContainsString('Milpa is running', $body);
+        $this->assertStringContainsString('Your first five minutes', $body);
+        $this->assertStringContainsString('php bin/coa wow', $body);
+        $this->assertStringContainsString('php bin/coa agent:enable', $body);
     }
 
     public function testTheConfigBagGreetingReachesThePage(): void

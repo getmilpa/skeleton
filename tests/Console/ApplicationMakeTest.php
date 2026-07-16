@@ -90,6 +90,21 @@ PHP;
         parent::tearDown();
     }
 
+    public function testWowShowsTheFirstFiveMinutesPathWithoutMutatingTheApp(): void
+    {
+        $before = file_get_contents($this->root . '/config/plugins.php');
+
+        $exit = $this->runCoa('wow');
+
+        $this->assertSame(0, $exit);
+        $output = $this->lastOutput();
+        $this->assertStringContainsString('milpa · coa wow — the first five minutes', $output);
+        $this->assertStringContainsString('create → inspect → extend → validate → expose to agents', $output);
+        $this->assertStringContainsString('php bin/coa make:controller DemoPlugin DemoController --path=/demo --register', $output);
+        $this->assertStringContainsString('php bin/coa agent:enable', $output);
+        $this->assertSame($before, file_get_contents($this->root . '/config/plugins.php'));
+    }
+
     public function testMakeControllerCanRegisterTheGeneratedPluginAndKeepContainerUseful(): void
     {
         $exit = $this->runCoa('make:controller', 'ReviewPlugin', 'ReviewController', '--path=/review', '--register');
