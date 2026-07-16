@@ -29,7 +29,7 @@ final class ApplicationMakeTest extends TestCase
 
         $this->root = sys_get_temp_dir() . '/milpa-skeleton-application-make-' . bin2hex(random_bytes(4));
         mkdir($this->root . '/config', 0777, true);
-        mkdir($this->root . '/src/Plugins/HelloPlugin', 0777, true);
+        mkdir($this->root . '/src/Plugins/HarnessPlugin', 0777, true);
 
         file_put_contents($this->root . '/composer.json', json_encode([
             'autoload' => [
@@ -44,11 +44,56 @@ final class ApplicationMakeTest extends TestCase
 
 declare(strict_types=1);
 
-use App\Plugins\HelloPlugin\HelloPlugin;
+use App\Plugins\HarnessPlugin\HarnessPlugin;
 
 return [
-    HelloPlugin::class,
+    HarnessPlugin::class,
 ];
+PHP);
+        file_put_contents($this->root . '/src/Plugins/HarnessPlugin/HarnessPlugin.php', <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+namespace App\Plugins\HarnessPlugin;
+
+use Milpa\Attributes\PluginMetadata;
+use Milpa\Interfaces\Di\DIContainerInterface;
+use Milpa\Interfaces\Plugin\PluginInterface;
+
+#[PluginMetadata(
+    version: '1.0.0',
+    author: 'Milpa Skeleton Test Harness',
+    site: 'https://github.com/getmilpa/skeleton',
+    name: 'HarnessPlugin',
+    type: 'Service',
+)]
+final class HarnessPlugin implements PluginInterface
+{
+    public function __construct(DIContainerInterface $container)
+    {
+    }
+
+    public function boot(): void
+    {
+    }
+
+    public function install(): void
+    {
+    }
+
+    public function uninstall(): void
+    {
+    }
+
+    public function enable(): void
+    {
+    }
+
+    public function disable(): void
+    {
+    }
+}
 PHP);
         mkdir($this->root . '/vendor', 0777, true);
         $autoload = <<<'PHP'
@@ -90,6 +135,14 @@ PHP;
         parent::tearDown();
     }
 
+    public function testHarnessProvidesItsOwnPluginFixture(): void
+    {
+        $plugin = $this->root . '/src/Plugins/HarnessPlugin/HarnessPlugin.php';
+
+        $this->assertFileExists($plugin);
+        $this->assertStringContainsString('final class HarnessPlugin', (string) file_get_contents($plugin));
+    }
+
     public function testWowShowsTheFirstFiveMinutesPathWithoutMutatingTheApp(): void
     {
         $before = file_get_contents($this->root . '/config/plugins.php');
@@ -115,8 +168,16 @@ PHP;
         $this->assertStringContainsString('use App\\Plugins\\ReviewPlugin\\ReviewPlugin;', $plugins);
         $this->assertStringContainsString('ReviewPlugin::class,', $plugins);
 
-        $plugin = file_get_contents($this->root . '/src/Plugins/ReviewPlugin/ReviewPlugin.php');
+        $controllerPath = $this->root . '/src/Plugins/ReviewPlugin/Controllers/ReviewController.php';
+        $pluginPath = $this->root . '/src/Plugins/ReviewPlugin/ReviewPlugin.php';
+        $controller = file_get_contents($controllerPath);
+        $plugin = file_get_contents($pluginPath);
+        $this->assertIsString($controller);
         $this->assertIsString($plugin);
+        $this->assertPhpFileLints($controllerPath);
+        $this->assertPhpFileLints($pluginPath);
+        $this->assertStringNotContainsString('DIContainerInterface', $controller);
+        $this->assertStringNotContainsString('private readonly DIContainerInterface $container', $controller);
         $this->assertStringContainsString('private readonly DIContainerInterface $container', $plugin);
         $this->assertStringContainsString('registerService(ReviewController::class, new ReviewController())', $plugin);
         $this->assertStringContainsString('boot() registers the generated controller', $plugin);
@@ -124,15 +185,22 @@ PHP;
 
     public function testMakeEntityCanWireRepositoryIntoAnExistingMarkedPluginWhenExplicitlyRequested(): void
     {
-        $this->runCoa('make:controller', 'ReviewPlugin', 'ReviewController', '--path=/review');
+        $this->runCoa('make:controller', 'ReviewPlugin', 'ReviewController', '--path=/review', '--register');
 
         $exit = $this->runCoa('make:entity', 'ReviewPlugin', 'Note', '--fields=title:string:120,done:bool', '--wire');
 
         $this->assertSame(0, $exit);
-        $plugin = file_get_contents($this->root . '/src/Plugins/ReviewPlugin/ReviewPlugin.php');
+        $pluginPath = $this->root . '/src/Plugins/ReviewPlugin/ReviewPlugin.php';
+        $plugin = file_get_contents($pluginPath);
         $this->assertIsString($plugin);
+        $this->assertPhpFileLints($pluginPath);
         $this->assertStringContainsString('RepositoryFactory::fromConfig($storage, \\App\\Plugins\\ReviewPlugin\\Entities\\Note::class)', $plugin);
         $this->assertStringContainsString('\\App\\Plugins\\ReviewPlugin\\Entities\\Note::class . \'Repository\'', $plugin);
+
+        $kernel = $this->bootTempKernel();
+        $repositoryId = \App\Plugins\ReviewPlugin\Entities\Note::class . 'Repository';
+        $this->assertTrue($kernel->container()->has($repositoryId));
+        $this->assertInstanceOf(\Milpa\Data\RepositoryInterface::class, $kernel->container()->get($repositoryId));
     }
 
     public function testMakeCrudPrintsOneCleanNewPluginRegistrationGuidance(): void
@@ -143,6 +211,25 @@ PHP;
         $this->assertStringContainsString('New plugin — register it so the kernel boots it: add App\\Plugins\\TaskPlugin\\TaskPlugin::class', $output);
         $this->assertStringNotContainsString('Entity/repository wiring (from make:entity', $output);
         $this->assertStringNotContainsString('Controller/route wiring:', $output);
+    }
+
+    private function bootTempKernel(): \Milpa\Runtime\Kernel
+    {
+        /** @var list<class-string> $plugins */
+        $plugins = require $this->root . '/config/plugins.php';
+        /** @var array<string, mixed> $config */
+        $config = require $this->root . '/config/app.php';
+
+        return \Milpa\Runtime\Kernel::boot(['root' => $this->root, 'plugins' => $plugins, 'config' => $config]);
+    }
+
+    private function assertPhpFileLints(string $path): void
+    {
+        $output = [];
+        $exitCode = 0;
+        exec('php -l ' . escapeshellarg($path), $output, $exitCode);
+
+        $this->assertSame(0, $exitCode, implode("\n", $output));
     }
 
     private function runCoa(string ...$args): int
