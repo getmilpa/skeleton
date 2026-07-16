@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/getmilpa/skeleton/compare/v0.8.0...v0.9.0) (2026-07-16)
+
+
+### Features
+
+* skeleton wow path + hardened make harness ([#20](https://github.com/getmilpa/skeleton/issues/20)) ([f425f22](https://github.com/getmilpa/skeleton/commit/f425f227c4858abda56a489dbfe7fe096d1725aa))
+
 ## [0.8.0](https://github.com/getmilpa/skeleton/compare/v0.7.0...v0.8.0) (2026-07-15)
 
 
