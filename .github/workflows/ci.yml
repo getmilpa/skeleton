@@ -75,3 +75,6 @@ jobs:
         run: |
           vendor/bin/phpunit --coverage-clover=build/clover.xml
           php tools/coverage-floor.php build/clover.xml 90
+
+      - name: Attribution gate
+        run: php tools/verify-attribution.php
