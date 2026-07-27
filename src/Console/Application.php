@@ -136,8 +136,30 @@ final class Application
     {
     }
 
-    /** @param list<string> $argv */
+    /**
+     * Runs one command and returns its exit code.
+     *
+     * The generators reach `milpa/devtools`' write guard, which throws rather
+     * than overwrite. `bin/coa` has no try/catch of its own, so re-running any
+     * generator — the most likely thing anyone does twice — used to print a
+     * PHP stack trace and exit 255 instead of the one line that says to pass
+     * `--force`. The message was always right; nothing was catching it.
+     *
+     * @param list<string> $argv
+     */
     public function run(array $argv): int
+    {
+        try {
+            return $this->dispatch($argv);
+        } catch (\RuntimeException $e) {
+            $this->line('✗ ' . $e->getMessage());
+
+            return 1;
+        }
+    }
+
+    /** @param list<string> $argv */
+    private function dispatch(array $argv): int
     {
         $command = $argv[1] ?? 'list';
         $args = \array_slice($argv, 2);
@@ -1144,7 +1166,18 @@ final class Application
             }
         }
 
-        return $this->help();
+        // Asking for the listing is not the same as mistyping a command. Both
+        // print the help, but only one of them is success: a script that runs
+        // `coa migrat` and gets exit 0 reports a deploy that never happened.
+        if (\in_array($command, ['list', 'help', '--help', '-h'], true)) {
+            return $this->help();
+        }
+
+        $this->line("✗ unknown command: {$command}");
+        $this->line('');
+        $this->help();
+
+        return 1;
     }
 
     /** @param list<string> $args */

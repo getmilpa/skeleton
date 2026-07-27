@@ -150,4 +150,17 @@ final class HttpProjectorTest extends TestCase
         return (new ServerRequest($method, $path, ['Content-Type' => 'application/json'], $body))
             ->withAttribute(RouteResult::ATTRIBUTE, RouteResult::matched($route));
     }
+
+    public function testItNamesItsSurfaceAndClaimsOnlyOperationsThatOfferIt(): void
+    {
+        // The projector registry routes by these two answers. A projector that
+        // claimed every operation would expose CLI-only ones over HTTP.
+        $projector = new HttpProjector([], $this->createMock(DIContainerInterface::class));
+        $solaHttp = new Operation('solo_http', 'Solo HTTP', static fn (array $i): array => $i, surfaces: ['http']);
+        $solaCli = new Operation('solo_cli', 'Solo CLI', static fn (array $i): array => $i, surfaces: ['cli']);
+
+        self::assertSame('http', $projector->surface());
+        self::assertTrue($projector->supports($solaHttp));
+        self::assertFalse($projector->supports($solaCli), 'A CLI-only operation is not reachable over the wire.');
+    }
 }

@@ -91,4 +91,40 @@ final class CliProjectorTest extends TestCase
         self::assertSame(0, $code);
         self::assertTrue($ran);
     }
+
+    public function testItNamesItsSurfaceAndClaimsOnlyOperationsThatOfferIt(): void
+    {
+        // The projector registry routes by these two answers. A projector that
+        // claimed every operation would run HTTP-only ones from the terminal.
+        $solaCli = new Operation('solo_cli', 'Solo CLI', static fn (array $i): array => $i, surfaces: ['cli']);
+        $solaHttp = new Operation('solo_http', 'Solo HTTP', static fn (array $i): array => $i, surfaces: ['http']);
+
+        self::assertSame('cli', $this->projector->surface());
+        self::assertTrue($this->projector->supports($solaCli));
+        self::assertFalse($this->projector->supports($solaHttp));
+    }
+
+    public function testInputThatDoesNotMatchTheSchemaIsRefusedWithoutRunningTheHandler(): void
+    {
+        // Running the handler with a half-coerced bag is how a bad flag reaches
+        // business logic as a 0.
+        $ran = false;
+        $lines = [];
+        $op = new Operation('crear', 'Crear', static function (array $i) use (&$ran): array {
+            $ran = true;
+
+            return $i;
+        }, inputSchema: [
+            'type' => 'object',
+            'properties' => ['n' => ['type' => 'integer']],
+        ]);
+
+        $code = $this->projector->run($op, ['--n=muchos'], $this->container, static function (string $l) use (&$lines): void {
+            $lines[] = $l;
+        });
+
+        self::assertSame(1, $code);
+        self::assertFalse($ran, 'The handler never saw the bad input.');
+        self::assertStringContainsString('✗', implode("\n", $lines));
+    }
 }

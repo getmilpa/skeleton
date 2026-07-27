@@ -71,4 +71,15 @@ final class McpProjectorTest extends TestCase
 
         self::assertSame(0, $calls);
     }
+
+    public function testItNamesItsSurfaceAndClaimsOnlyOperationsThatOfferIt(): void
+    {
+        $projector = new McpProjector();
+        $solaMcp = new Operation('solo_mcp', 'Solo MCP', static fn (array $i): array => $i, surfaces: ['mcp']);
+        $solaCli = new Operation('solo_cli', 'Solo CLI', static fn (array $i): array => $i, surfaces: ['cli']);
+
+        self::assertSame('mcp', $projector->surface());
+        self::assertTrue($projector->supports($solaMcp));
+        self::assertFalse($projector->supports($solaCli), 'A CLI-only operation is not handed to an agent.');
+    }
 }
