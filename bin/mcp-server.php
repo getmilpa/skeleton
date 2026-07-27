@@ -4,6 +4,7 @@
 declare(strict_types=1);
 
 use Milpa\McpServer\JsonRpcService;
+use Milpa\Interfaces\Di\DIContainerInterface;
 use Milpa\Runtime\Kernel;
 use Milpa\ToolRuntime\Contracts\ToolContext;
 use Milpa\ToolRuntime\ToolRegistry;
@@ -27,15 +28,16 @@ if (!\class_exists(ToolRegistry::class) || !\class_exists(JsonRpcService::class)
     exit(0);
 }
 
-// Same config-loading contract `bin/coa` uses: config/plugins.php declares the active plugin
-// list, config/app.php is the optional app-config bag Kernel::boot() threads into
-// Milpa\Runtime\Config. Missing config/app.php is not fatal — an empty bag boots fine.
-$pluginsFile = $root . '/config/plugins.php';
+// Same config-loading contract `bin/coa` uses: config/boot.php resolves the container and the
+// plugins that actually boot, config/app.php is the optional app-config bag Kernel::boot()
+// threads into Milpa\Runtime\Config. Missing config/app.php is not fatal — an empty bag boots
+// fine; a missing config/boot.php means no plugins and no pre-wired services, which still serves
+// an empty tools/list.
+$bootFile = $root . '/config/boot.php';
+$boot = \is_file($bootFile) ? require $bootFile : [];
 /** @var list<class-string> $plugins */
-$plugins = \is_file($pluginsFile) ? require $pluginsFile : [];
-if (!\is_array($plugins)) {
-    $plugins = [];
-}
+$plugins = \is_array($boot) && \is_array($boot['plugins'] ?? null) ? $boot['plugins'] : [];
+$container = \is_array($boot) ? ($boot['container'] ?? null) : null;
 
 $configFile = $root . '/config/app.php';
 /** @var array<string, mixed> $config */
@@ -51,12 +53,17 @@ if (!\is_array($config)) {
 // registers is exposed here automatically — an app with tools does NOT copy this file, it just
 // has one. An app with zero tools still boots clean and serves an empty `tools/list`. Reached only
 // once the guard above confirms both agent-ready packages are actually installed.
-$kernel = Kernel::boot([
+$bootConfig = [
     'root' => $root,
     'plugins' => $plugins,
     'config' => $config,
     'toolRegistry' => new ToolRegistry(new NullLogger()),
-]);
+];
+if ($container instanceof DIContainerInterface) {
+    $bootConfig['container'] = $container;
+}
+
+$kernel = Kernel::boot($bootConfig);
 
 $registry = $kernel->toolRegistry();
 if (!$registry instanceof ToolRegistry) {

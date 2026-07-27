@@ -101,10 +101,43 @@ before calling it.
 | `public/index.php` | The HTTP entry point: builds a PSR-7 request from globals, boots the kernel, dispatches through `Milpa\Runtime\Http\RequestHandler`, emits the response. |
 | `bin/coa` | The CLI entry point — `doctor`, `validate`, `make:controller`/`entity`/`plugin`/`service`/`tool`/`crud`, `inspect:plugins`/`routes`/`services`/`tools`/`commands`, `agent:enable`. See [`src/Console/Application.php`](src/Console/Application.php). |
 | `bin/mcp-server.php` | The generic MCP stdio server. Only serves once agent-ready is turned on (see below) — a stock app prints guidance and exits `0`. |
-| `config/plugins.php` | The active-plugins list — a plain `list<class-string>`. This is the *only* source of truth for what boots; no database, no filesystem discovery. |
+| `config/plugins.php` | What this app **has** — a plain `list<class-string>` you edit and read in a diff. No database, no filesystem discovery. |
+| `config/boot.php` | What every entry point needs before the kernel runs: the container, and the plugins that actually boot. It resolves `config/plugins.php` against the activation store in one call, so the store the app boots from and the store the `plugins.*` operations write to cannot become two different files. |
+| `storage/plugins.json` | What is **switched on**. Written only when somebody enables, disables or installs something — an app that manages nothing never grows it. Deployment state, not template content. |
+| `plugins/` | Where the installer puts plugins fetched at runtime, under the `Milpa\Plugins` namespace. Plugins this app owns live in `src/Plugins/`. |
 | `config/app.php` | The app-config bag. Registered by `Kernel::boot()` as `Milpa\Runtime\Config`; plugins read it in `boot()`. See [The Config idiom](#the-config-idiom). |
 | `src/Plugins/HelloPlugin/` | The example plugin: `#[PluginMetadata]`, no `provides`/`requires`, one `GET /` route, and the Config read that drives the homepage greeting. Copy its shape for your own plugins. |
-| `tests/Boot/KernelBootTest.php` | The boot smoke test: the kernel boots from `config/plugins.php` and `GET /` returns 200. |
+| `tests/Boot/KernelBootTest.php` | The boot smoke test: the kernel boots from `config/boot.php` and `GET /` returns 200. |
+| `tests/Boot/PluginActivationTest.php` | Switching a plugin off actually stops it — end to end, through the same `config/boot.php` every entry point loads. |
+
+## Managing plugins
+
+`PluginManagementPlugin` is the first line in `config/plugins.php`, and it is what makes plugins
+manageable at all: it contributes the `plugins.*` operations, which the terminal, HTTP and MCP each
+project into their own shape. One definition, every surface.
+
+```bash
+php bin/coa plugins.list                     # what this app has, and what boots
+php bin/coa plugins.disable --name=HelloPlugin
+php bin/coa inspect:routes                   # its route is gone
+php bin/coa plugins.enable --name=HelloPlugin
+```
+
+**What this app has** is `config/plugins.php` — code. **What is switched on** is
+`storage/plugins.json` — state. A plugin in the list boots unless the store says otherwise, so an
+app that never manages anything behaves exactly as if the list were the only thing there is, and
+never grows the file. Keeping them apart is what lets an admin surface switch plugins without
+writing PHP back to disk: a page that rewrites its own source is a code-execution write surface,
+and it breaks the moment a deploy is read-only.
+
+Installing is a separate capability. Wire a `Milpa\Interfaces\Plugin\PluginInstallerInterface`
+into `config/boot.php`'s container and `plugins.install` / `plugins.update` / `plugins.remove`
+appear too — until then they simply do not exist, so no surface renders a button that fails when
+pressed. Those three declare `requiresConfirmation` and a stricter scope than the toggles, because
+they fetch and run code that was not here a moment ago. A freshly installed plugin arrives
+**disabled**: installing is not consenting to run it.
+
+Delete the `PluginManagementPlugin` line and this app goes back to being governed by the list alone.
 
 ## Agent-ready is opt-in
 
@@ -157,9 +190,12 @@ from the app-config bag:
 2. `public/index.php` (and `bin/coa`) pass it into the kernel:
 
    ```php
+   $boot = require $root . '/config/boot.php';
+
    $kernel = Kernel::boot([
-       'plugins' => require $root . '/config/plugins.php',
-       'config'  => require $root . '/config/app.php',
+       'plugins'   => $boot['plugins'],
+       'config'    => require $root . '/config/app.php',
+       'container' => $boot['container'],
    ]);
    ```
 

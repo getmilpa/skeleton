@@ -38,6 +38,8 @@ use Milpa\Exceptions\Plugin\PluginDependencyException;
 use Milpa\Http\HttpMethod;
 use Milpa\Interfaces\Plugin\PluginInterface;
 use Milpa\Interfaces\Tooling\ToolRegistryInterface;
+use Milpa\Command\CommandProvider;
+use Milpa\Interfaces\Di\DIContainerInterface;
 use Milpa\Runtime\CommandProviderInterface;
 use Milpa\Runtime\Config;
 use Milpa\Runtime\Http\RouteProviderInterface;
@@ -248,7 +250,13 @@ final class Application
         $config = $this->loadConfig();
 
         try {
-            $kernel = Kernel::boot(['root' => $this->root, 'plugins' => $plugins, 'config' => $config]);
+            $bootConfig = ['root' => $this->root, 'plugins' => $plugins, 'config' => $config];
+            $container = $this->loadContainer();
+            if ($container !== null) {
+                $bootConfig['container'] = $container;
+            }
+
+            $kernel = Kernel::boot($bootConfig);
         } catch (AttributeNotFoundException|PluginDependencyException|RootNotFoundException $e) {
             $this->line('✗ boot failed: ' . $e->getMessage());
 
@@ -845,6 +853,10 @@ final class Application
         $config = $this->loadConfig();
 
         $bootConfig = ['root' => $this->root, 'plugins' => $plugins, 'config' => $config];
+        $container = $this->loadContainer();
+        if ($container !== null) {
+            $bootConfig['container'] = $container;
+        }
         if (\class_exists(ToolRegistry::class)) {
             // Kernel::boot()'s config shape types this offset as core's ToolRegistryInterface —
             // and on the base install (tool-runtime absent) static analysis cannot know the
@@ -1112,15 +1124,26 @@ final class Application
         /** @var list<array{0: string, 1: string, 2: string}> $discovered */
         $discovered = [];
         foreach ($kernel->plugins() as $plugin) {
-            if (!$plugin instanceof CommandProviderInterface) {
+            // Two discovery seams, both real: the legacy `commands()` and
+            // Command-as-atom's `operations()`. Listing only the first hid every
+            // operation a plugin contributes — they ran fine, nobody could find
+            // them, and a command you cannot find is a command nobody uses.
+            if (!$plugin instanceof CommandProviderInterface && !$plugin instanceof CommandProvider) {
                 continue;
             }
             $meta = $this->pluginMetadata($plugin);
             if (!\in_array($meta->name, $booted, true)) {
                 continue;
             }
-            foreach ($plugin->commands() as $command) {
-                $discovered[] = [$command->name, $command->description, $meta->name];
+            if ($plugin instanceof CommandProviderInterface) {
+                foreach ($plugin->commands() as $command) {
+                    $discovered[] = [$command->name, $command->description, $meta->name];
+                }
+            }
+            if ($plugin instanceof CommandProvider) {
+                foreach ($plugin->operations() as $operation) {
+                    $discovered[] = [$operation->name, $operation->description, $meta->name];
+                }
             }
         }
 
@@ -1246,14 +1269,34 @@ final class Application
         $this->line('  opts for make:crud:       --fields="name:type[:mods],..."  --table=name  --flavor=runtime|legacy  --register  --force');
         $this->line('');
         $this->line('  Any other <name> is looked up in the discovered command table (a booted');
-        $this->line('  CommandProviderInterface plugin\'s commands()) and run if found — see `coa inspect:commands`.');
+        $this->line('  plugin\'s commands() or operations()) and run if found — see `coa inspect:commands`.');
 
         return 0;
     }
 
-    /** @return list<class-string>|null */
+    /**
+     * The plugins that actually boot.
+     *
+     * `config/boot.php` is asked first because it resolves the declared list against the
+     * activation store — booting the declared list instead would start a plugin somebody switched
+     * off, and `doctor` would report an app that does not exist. An app without that file has no
+     * store, so its declared list IS what boots.
+     *
+     * @return list<class-string>|null
+     */
     private function loadPluginList(): ?array
     {
+        $bootFile = $this->root . '/config/boot.php';
+        if (\is_file($bootFile)) {
+            $boot = require $bootFile;
+            if (\is_array($boot) && \is_array($boot['plugins'] ?? null)) {
+                /** @var list<class-string> $resolved */
+                $resolved = $boot['plugins'];
+
+                return $resolved;
+            }
+        }
+
         $path = $this->root . '/config/plugins.php';
         if (!\is_file($path)) {
             $this->line("✗ {$path} not found.");
@@ -1270,6 +1313,27 @@ final class Application
 
         /** @var list<class-string> $plugins */
         return $plugins;
+    }
+
+    /**
+     * Loads the pre-boot container from `config/boot.php` — where the app registers the services a
+     * plugin needs at construction time, the activation store among them.
+     *
+     * A missing file is not fatal: `Kernel::boot()` makes its own container, and an app with no
+     * such services never needs one. What is NOT acceptable is loading it here and not there, so
+     * both boot sites in this file go through this method.
+     */
+    private function loadContainer(): ?DIContainerInterface
+    {
+        $path = $this->root . '/config/boot.php';
+        if (!\is_file($path)) {
+            return null;
+        }
+
+        $boot = require $path;
+        $container = \is_array($boot) ? ($boot['container'] ?? null) : null;
+
+        return $container instanceof DIContainerInterface ? $container : null;
     }
 
     /**

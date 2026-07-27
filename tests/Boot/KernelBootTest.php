@@ -76,18 +76,20 @@ final class KernelBootTest extends TestCase
     }
 
     /**
-     * Loads the same plugin list and config bag `public/index.php` and `bin/coa` boot with.
+     * Boots exactly the way `public/index.php` and `bin/coa` do — through `config/boot.php`,
+     * which resolves the container and the plugins that actually boot together. Assembling those
+     * two separately here would test an app no entry point produces.
      *
-     * @return array{root: string, plugins: list<class-string>, config: array<string, mixed>}
+     * @return array{root: string, plugins: list<class-string>, config: array<string, mixed>, container: \Milpa\Interfaces\Di\DIContainerInterface}
      */
     private function bootConfig(): array
     {
         $root = \dirname(__DIR__, 2);
-        /** @var list<class-string> $plugins */
-        $plugins = require $root . '/config/plugins.php';
+        /** @var array{container: \Milpa\Interfaces\Di\DIContainerInterface, plugins: list<class-string>} $boot */
+        $boot = require $root . '/config/boot.php';
         /** @var array<string, mixed> $config */
         $config = require $root . '/config/app.php';
 
-        return ['root' => $root, 'plugins' => $plugins, 'config' => $config];
+        return ['root' => $root, 'plugins' => $boot['plugins'], 'config' => $config, 'container' => $boot['container']];
     }
 }

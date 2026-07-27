@@ -13,19 +13,20 @@ require __DIR__ . '/../vendor/autoload.php';
 // for every request, so leaving this to Kernel::boot()'s own auto-detection would still work
 // here (RootResolver falls back to Composer\InstalledVersions, not getcwd(), when it can) but
 // passing it explicitly keeps this entry point honest about where "the app" actually is,
-// exactly like config/plugins.php below, which is loaded relative to the same root.
+// exactly like config/boot.php below, which is loaded relative to the same root.
 $root = \dirname(__DIR__);
 
-/** @var list<class-string> $plugins */
-$plugins = require $root . '/config/plugins.php';
+/** @var array{container: \Milpa\Interfaces\Di\DIContainerInterface, plugins: list<class-string>} $boot */
+$boot = require $root . '/config/boot.php';
 
 /** @var array<string, mixed> $config */
 $config = require $root . '/config/app.php';
 
 $kernel = Kernel::boot([
     'root' => $root,
-    'plugins' => $plugins,
+    'plugins' => $boot['plugins'],
     'config' => $config,
+    'container' => $boot['container'],
 ]);
 
 $psr17 = new Psr17Factory();

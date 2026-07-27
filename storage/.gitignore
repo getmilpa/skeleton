@@ -1,0 +1,4 @@
+# Runtime state. `plugins.json` records which plugins are switched on and what
+# was installed at runtime — it belongs to the deployment, not to the template.
+*
+!.gitignore

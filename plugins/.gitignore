@@ -1,0 +1,5 @@
+# Where the installer puts plugins it fetched at runtime, one directory per
+# plugin under the `Milpa\Plugins` namespace. What lands here belongs to the
+# deployment; plugins this app owns live in `src/Plugins/`.
+*
+!.gitignore
