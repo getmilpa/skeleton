@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.11.0](https://github.com/getmilpa/skeleton/compare/v0.10.0...v0.11.0) (2026-07-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* --sign replaces --yes on the CLI surface
+
+### Features
+
+* --sign replaces --yes on the CLI surface ([2ec8af3](https://github.com/getmilpa/skeleton/commit/2ec8af3af5a79c4fd3583c5fdb53872afeedb0cd))
+
+
+### Bug Fixes
+
+* tool-runtime is a requirement, so stop suggesting it be installed ([4f9a7a7](https://github.com/getmilpa/skeleton/commit/4f9a7a7177148d51415ce24c18d6c3f1ac1e98e5))
+
 ## [0.10.0](https://github.com/getmilpa/skeleton/compare/v0.9.0...v0.10.0) (2026-07-28)
 
 
