@@ -1,6 +1,6 @@
 {
   "name": "milpa/skeleton",
-  "description": "The composer create-project starting point for a Milpa app: boots milpa/runtime's Kernel, serves a real HTTP response with zero database, and ships a coa CLI (doctor/validate/make/inspect, plus every plugin-declared CommandProviderInterface command) wired to milpa/devtools. Minimal by default \u2014 the agent-ready surface (MCP/tools, bin/mcp-server.php) is opt-in via `composer require milpa/tool-runtime milpa/mcp-server` or `php bin/coa agent:enable`.",
+  "description": "The composer create-project starting point for a Milpa app: boots milpa/runtime's Kernel, serves a real HTTP response with zero database, and ships a coa CLI (doctor/validate/make/inspect, plus every plugin-declared CommandProviderInterface command) wired to milpa/devtools. Minimal by default \u2014 the agent-ready surface (MCP/tools, bin/mcp-server.php) is opt-in via `composer require milpa/mcp-server` or `php bin/coa agent:enable`.",
   "type": "project",
   "license": "Apache-2.0",
   "authors": [
@@ -29,12 +29,10 @@
     "phpunit/phpunit": "^11.5",
     "phpstan/phpstan": "^2.1",
     "phpstan/phpdoc-parser": "^2.3",
-    "friendsofphp/php-cs-fixer": "^3.65",
-    "milpa/tool-runtime": "*"
+    "friendsofphp/php-cs-fixer": "^3.65"
   },
   "suggest": {
-    "milpa/tool-runtime": "Install to expose this app's tools over MCP \u2014 the agent-ready surface. `composer require milpa/tool-runtime milpa/mcp-server` (or: `php bin/coa agent:enable`).",
-    "milpa/mcp-server": "Install to expose this app's tools over MCP \u2014 the agent-ready surface. `composer require milpa/tool-runtime milpa/mcp-server` (or: `php bin/coa agent:enable`)."
+    "milpa/mcp-server": "Install to expose this app's tools over MCP \u2014 the agent-ready surface (tool-runtime already ships, since the CLI's consent gate is built on it). Or: `php bin/coa agent:enable`."
   },
   "autoload": {
     "psr-4": {
