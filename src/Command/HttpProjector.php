@@ -17,11 +17,16 @@ namespace App\Command;
 use Milpa\Auth\AuthContext;
 use Milpa\Auth\Contracts\AuthContextFactory;
 use Milpa\Auth\Contracts\CredentialVerifier;
+use Milpa\Auth\Contracts\PermissionContextFactory;
+use Milpa\Auth\Contracts\PermissionResolver;
 use Milpa\Auth\Exceptions\AuthContextMissingException;
 use Milpa\Auth\Exceptions\AuthMiddlewareNotInstalledException;
+use Milpa\Auth\Exceptions\PermissionDeniedException;
 use Milpa\Auth\Exceptions\ScopeDeniedException;
 use Milpa\Auth\Http\AuthenticateMiddleware;
+use Milpa\Auth\Http\RequirePermissionMiddleware;
 use Milpa\Auth\Http\RequireScopeMiddleware;
+use Milpa\Auth\Permission;
 use Milpa\Command\Operation;
 use Milpa\Command\SurfaceProjector;
 use Milpa\Http\HttpMethod;
@@ -57,6 +62,15 @@ use Psr\Http\Server\RequestHandlerInterface;
  * honest {@see ToolContext::web()} (real principal + real scopes, never the faked wildcard) and runs
  * it through the same {@see PolicyGate} that guards MCP. An operation with EMPTY scopes touches NONE
  * of this: it is byte-identical to the pre-auth confirm-gate-only path.
+ *
+ * PERMISSION ENFORCEMENT — the permission-typed counterpart of the above. An operation may declare
+ * `$op->permission` INSTEAD OF `$op->scopes` (Operation enforces scope XOR permission at
+ * construction), in which case `handle()` runs milpa/auth's {@see RequirePermissionMiddleware}
+ * against the same attached {@see AuthContext} — 401 {@see AuthContextMissingException}, 403
+ * {@see PermissionDeniedException} — via the parallel `enforcePermission()` gate. The same 500
+ * {@see AuthMiddlewareNotInstalledException} architectural distinction applies when no auth chain is
+ * wired. This path runs the honest RequirePermission gate ONLY: `enforceWebPolicy()`'s tool-runtime
+ * PolicyGate is scope-specific defense-in-depth and is not applied to permission-typed operations.
  *
  * ENFORCEMENT LIVES IN `handle()`, NOT ROUTE MIDDLEWARE, on purpose: there is exactly ONE
  * HttpProjector instance serving EVERY operation (see below), and a route's `middleware[]` is
@@ -157,6 +171,15 @@ final class HttpProjector implements SurfaceProjector
             }
         }
 
+        // Permission enforcement — the permission-typed counterpart of the scope gate. Scope XOR
+        // permission is guaranteed at Operation construction, so at most one of these branches runs.
+        if ($op->permission !== null) {
+            $denied = $this->enforcePermission($op, $request);
+            if ($denied !== null) {
+                return $denied;
+            }
+        }
+
         if ($op->mutating && $op->requiresConfirmation) {
             $token = $request->getHeaderLine('Confirm-Token');
             if ($token === '') {
@@ -240,6 +263,42 @@ final class HttpProjector implements SurfaceProjector
         // with the honest ToolContext::web (real principal + real scopes). Opt-in — only when the
         // agent-ready surface (milpa/tool-runtime) is installed.
         return $this->enforceWebPolicy($op, $request);
+    }
+
+    /**
+     * Enforces `$op`'s declared permission for one request, mirroring {@see self::enforceScopes()}.
+     * Returns null when authorized, a ready 401/403 JSON response when the milpa/auth permission gate
+     * denies, and throws {@see AuthMiddlewareNotInstalledException} (500) when the operation declares a
+     * permission but the host wired no auth chain. The permission path runs the honest RequirePermission
+     * gate only — the scope-based tool-runtime PolicyGate is not applied here.
+     */
+    private function enforcePermission(Operation $op, ServerRequestInterface $request): ?ResponseInterface
+    {
+        if (!$this->authChainInstalled()) {
+            throw AuthMiddlewareNotInstalledException::forPermissionedOperation($op->name, (string) $op->permission);
+        }
+
+        $resolver = $this->container->has(PermissionResolver::class) ? $this->container->get(PermissionResolver::class) : null;
+        $contextFactory = $this->container->has(PermissionContextFactory::class) ? $this->container->get(PermissionContextFactory::class) : null;
+
+        $guard = new RequirePermissionMiddleware(
+            Permission::parse((string) $op->permission),
+            $resolver instanceof PermissionResolver ? $resolver : null,
+            $contextFactory instanceof PermissionContextFactory ? $contextFactory : null,
+        );
+
+        try {
+            $guard->process($request, new class () implements RequestHandlerInterface {
+                public function handle(ServerRequestInterface $request): ResponseInterface
+                {
+                    return new Response(204);
+                }
+            });
+        } catch (AuthContextMissingException | PermissionDeniedException $e) {
+            return $this->json($e->statusCode(), ['error' => $e->getMessage(), 'code' => $e->errorCode()]);
+        }
+
+        return null;
     }
 
     /**
