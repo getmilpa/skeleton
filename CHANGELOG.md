@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.10.0](https://github.com/getmilpa/skeleton/compare/v0.9.0...v0.10.0) (2026-07-28)
+
+
+### Features
+
+* enforce permissions in the HTTP projector, on milpa/auth ^0.3 ([684fcba](https://github.com/getmilpa/skeleton/commit/684fcbac67855b01bb2aebc912cdcfc223ebb00a))
+* los plugins se administran desde cualquier superficie, sin reescribir PHP ([5c489ea](https://github.com/getmilpa/skeleton/commit/5c489eacb103540e2e988d4c8b247150c6d3949d))
+
+
+### Bug Fixes
+
+* coa deja de tronar al re-correr un generador y de salir 0 con un typo (52.0% -&gt; 90.1%) ([4b786fd](https://github.com/getmilpa/skeleton/commit/4b786fd2465199244258740d2cabb3599a0c71fc))
+
 ## [0.9.0](https://github.com/getmilpa/skeleton/compare/v0.8.0...v0.9.0) (2026-07-16)
 
 
