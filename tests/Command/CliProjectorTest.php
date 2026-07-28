@@ -58,8 +58,12 @@ final class CliProjectorTest extends TestCase
         self::assertSame(0, $code);
     }
 
-    public function testMutatingConfirmationRequiresYes(): void
+    public function testMutatingConfirmationIsRefusedWithoutASignedAuthorization(): void
     {
+        // `--yes` is gone: it consented without naming what it consented to, so one yes covered
+        // every plugin on every host. The gate now asks for a signature over this exact call, and
+        // the refusal points at it. The four ways a signature can fail live in
+        // {@see CliProjectorSignatureGateTest}; here only the door matters.
         $lines = [];
         $ran = false;
         $op = new Operation('wipe', 'Wipe', static function (array $i) use (&$ran): int {
@@ -68,28 +72,13 @@ final class CliProjectorTest extends TestCase
             return 0;
         }, mutating: true, requiresConfirmation: true);
 
-        $code = $this->projector->run($op, [], $this->container, static function (string $l) use (&$lines): void {
+        $code = $this->projector->run($op, ['--yes'], $this->container, static function (string $l) use (&$lines): void {
             $lines[] = $l;
         });
 
         self::assertSame(1, $code);
-        self::assertFalse($ran, 'handler must not run without --yes');
-        self::assertStringContainsString('--yes', $lines[0]);
-    }
-
-    public function testMutatingProceedsWithYes(): void
-    {
-        $ran = false;
-        $op = new Operation('wipe', 'Wipe', static function (array $i) use (&$ran): int {
-            $ran = true;
-
-            return 0;
-        }, mutating: true, requiresConfirmation: true);
-
-        $code = $this->projector->run($op, ['--yes'], $this->container, static fn (string $l) => null);
-
-        self::assertSame(0, $code);
-        self::assertTrue($ran);
+        self::assertFalse($ran, 'The old flag authorizes nothing.');
+        self::assertStringContainsString('--sign', implode("\n", $lines));
     }
 
     public function testItNamesItsSurfaceAndClaimsOnlyOperationsThatOfferIt(): void

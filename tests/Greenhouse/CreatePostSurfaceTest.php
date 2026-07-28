@@ -25,6 +25,8 @@ use PHPUnit\Framework\TestCase;
  */
 final class CreatePostSurfaceTest extends TestCase
 {
+    use \App\Tests\Support\SignsOperations;
+
     private function bootKernel(): Kernel
     {
         return Kernel::boot(['plugins' => [GreenhousePlugin::class]]);
@@ -36,9 +38,11 @@ final class CreatePostSurfaceTest extends TestCase
         $op = $kernel->commands()[0];
         $lines = [];
 
-        $code = (new CliProjector())->run(
+        // Consent on this surface is a signature now; the doubles keep that out of the way, since
+        // what this test is about is the same handler answering on three surfaces.
+        $code = (new CliProjector(signer: $this->alwaysSigns(), authorizer: $this->acceptingAuthorizer()))->run(
             $op,
-            ['--title=Hi', '--body=Yo', '--yes'],
+            ['--title=Hi', '--body=Yo', '--sign'],
             $kernel->container(),
             static function (string $l) use (&$lines): void {
                 $lines[] = $l;
@@ -46,7 +50,10 @@ final class CreatePostSurfaceTest extends TestCase
         );
 
         self::assertSame(0, $code);
-        self::assertSame(['{"id":1,"title":"Hi","body":"Yo"}'], $lines);
+        // Who authorized comes first, before the effect — a wrong card is meant to be caught by
+        // the person standing there, not by an audit weeks later.
+        self::assertStringStartsWith('✓ authorized by BE7554E9', $lines[0]);
+        self::assertSame('{"id":1,"title":"Hi","body":"Yo"}', $lines[1]);
     }
 
     public function testMcpSurfaceRegistersAndInvokesTheSameHandler(): void
