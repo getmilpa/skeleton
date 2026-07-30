@@ -81,16 +81,24 @@ final class ApplicationAgainstThisAppTest extends TestCase
         self::assertStringContainsString('2 plugin(s) configured, 2 booted', $output);
     }
 
+    /**
+     * La salida trae envoltura (`ok` + `result`) desde que el formato lo decide un renderer.
+     *
+     * No es adorno: el acierto y la falla ahora se parsean igual, y antes no — un error salía como
+     * texto con viñeta mientras el acierto salía como objeto, así que un consumidor tenía que
+     * escribir el parser dos veces y adivinar cuál aplicaba. `ok` es lo que se mira primero.
+     */
     public function testAnOperationRunsAsACommandAndReturnsItsDataAsJson(): void
     {
         $output = $this->coa('plugins.list');
 
-        /** @var array{plugins: list<array<string, mixed>>} $decoded */
+        /** @var array{ok: bool, result: array{plugins: list<array<string, mixed>>}} $decoded */
         $decoded = json_decode(trim($output), true, 512, JSON_THROW_ON_ERROR);
 
+        self::assertTrue($decoded['ok']);
         self::assertSame(
             ['PluginManagement', 'HelloPlugin'],
-            array_column($decoded['plugins'], 'name'),
+            array_column($decoded['result']['plugins'], 'name'),
         );
     }
 

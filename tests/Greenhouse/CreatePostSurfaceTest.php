@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Greenhouse;
 
 use Milpa\Console\CliRunner;
+use Milpa\Console\Rendering\JsonCliRenderer;
 use App\Command\HttpProjector;
 use Milpa\Console\McpProjector;
 use Milpa\Auth\Actor;
@@ -40,7 +41,15 @@ final class CreatePostSurfaceTest extends TestCase
 
         // Consent on this surface is a signature now; the doubles keep that out of the way, since
         // what this test is about is the same handler answering on three surfaces.
-        $code = (new CliRunner(signer: $this->alwaysSigns(), authorizer: $this->acceptingAuthorizer()))->run(
+        // El renderer se DECLARA, y aquí se declara JSON a propósito: la tesis de esta prueba es que
+        // el MISMO handler contesta en tres superficies, y esa igualdad se ve comparando datos
+        // contra datos. Con el renderer de texto la respuesta sería igual de correcta y la
+        // comparación con `mcp` dejaría de ser directa.
+        $code = (new CliRunner(
+            signer: $this->alwaysSigns(),
+            authorizer: $this->acceptingAuthorizer(),
+            renderer: new JsonCliRenderer(),
+        ))->run(
             $op,
             ['--title=Hi', '--body=Yo', '--sign'],
             $kernel->container(),
@@ -53,7 +62,7 @@ final class CreatePostSurfaceTest extends TestCase
         // Who authorized comes first, before the effect — a wrong card is meant to be caught by
         // the person standing there, not by an audit weeks later.
         self::assertStringStartsWith('✓ authorized by BE7554E9', $lines[0]);
-        self::assertSame('{"id":1,"title":"Hi","body":"Yo"}', $lines[1]);
+        self::assertSame('{"ok":true,"result":{"id":1,"title":"Hi","body":"Yo"}}', $lines[1]);
     }
 
     public function testMcpSurfaceRegistersAndInvokesTheSameHandler(): void

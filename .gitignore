@@ -2,3 +2,6 @@
 /composer.lock
 /.phpunit.cache/
 /.php-cs-fixer.cache
+
+# Reporte de cobertura: generado, con rutas absolutas de la máquina que lo corrió.
+/build/

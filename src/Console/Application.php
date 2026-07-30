@@ -15,6 +15,7 @@ declare(strict_types=1);
 namespace App\Console;
 
 use Milpa\Console\CliRunner;
+use Milpa\Console\Rendering\JsonCliRenderer;
 use Milpa\Console\McpProjector;
 use Milpa\Attributes\PluginMetadata;
 use Milpa\Command\Operation;
@@ -1203,10 +1204,25 @@ final class Application
         return 1;
     }
 
-    /** @param list<string> $args */
+    /**
+     * Corre una operación en esta terminal, en JSON.
+     *
+     * El formato ahora se DECLARA. Antes salía JSON porque `CliRunner` codificaba con `json_encode`
+     * todo resultado que no fuera escalar — no había otra cosa que pudiera hacer, así que no era una
+     * elección de esta app aunque su prueba la diera por tal. Desde que `milpa/console` tiene
+     * renderers intercambiables, el default es texto para una persona y quedarse en JSON es una
+     * línea que se lee en un diff.
+     *
+     * Se conserva porque esta app es la referencia de un `create-project` cuyo `coa` está pensado
+     * para que un agente lo consuma. Cambiarla a {@see PlainTextCliRenderer} es hoy un cambio de un
+     * argumento, y ésa es exactamente la propiedad que ADR-0035 pedía: cambiar el renderer de una
+     * superficie sin tocar su projector.
+     *
+     * @param list<string> $args
+     */
     private function invokeCommand(Operation $definition, array $args, Kernel $kernel): int
     {
-        return (new CliRunner())->run(
+        return (new CliRunner(renderer: new JsonCliRenderer()))->run(
             $definition,
             $args,
             $kernel->container(),
