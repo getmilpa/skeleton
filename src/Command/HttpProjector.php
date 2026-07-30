@@ -17,8 +17,6 @@ namespace App\Command;
 use Milpa\Auth\AuthContext;
 use Milpa\Auth\Contracts\AuthContextFactory;
 use Milpa\Auth\Contracts\CredentialVerifier;
-use Milpa\Auth\Contracts\PermissionContextFactory;
-use Milpa\Auth\Contracts\PermissionResolver;
 use Milpa\Auth\Exceptions\AuthContextMissingException;
 use Milpa\Auth\Exceptions\AuthMiddlewareNotInstalledException;
 use Milpa\Auth\Exceptions\PermissionDeniedException;
@@ -27,8 +25,12 @@ use Milpa\Auth\Http\AuthenticateMiddleware;
 use Milpa\Auth\Http\RequirePermissionMiddleware;
 use Milpa\Auth\Http\RequireScopeMiddleware;
 use Milpa\Auth\Permission;
+use Milpa\Command\HttpRouteModel;
 use Milpa\Command\Operation;
 use Milpa\Command\SurfaceProjector;
+use Milpa\Console\ConfirmTokenStore;
+use Milpa\Console\SchemaCoercer;
+use Milpa\Console\SchemaCoercionException;
 use Milpa\Http\HttpMethod;
 use Milpa\Http\Routing\HandlerReference;
 use Milpa\Http\Routing\Route;
@@ -36,11 +38,9 @@ use Milpa\Http\Routing\RouteResult;
 use Milpa\Interfaces\Di\DIContainerInterface;
 use Milpa\ToolRuntime\Contracts\ToolContext;
 use Milpa\ToolRuntime\PolicyGate;
-use Milpa\ToolRuntime\ToolDefinition;
 use Nyholm\Psr7\Response;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
-use Psr\Http\Server\RequestHandlerInterface;
 
 /**
  * Projects Operations to the HTTP surface. It is BOTH a route source — `routes()` synthesizes one
@@ -109,6 +109,9 @@ final class HttpProjector implements SurfaceProjector
         private readonly DIContainerInterface $container,
         private readonly SchemaCoercer $coercer = new SchemaCoercer(),
         private readonly ConfirmTokenStore $tokens = new ConfirmTokenStore(),
+        // La política se inyecta y ya no se hereda: es el eje `Intent -> Policy -> Signer`, y
+        // tenerla como colaborador es lo que permite verla, sustituirla y probarla sola.
+        private readonly ?HttpOperationPolicy $policy = null,
     ) {
         foreach ($operations as $op) {
             if ($op->supportsSurface('http')) {
@@ -125,6 +128,32 @@ final class HttpProjector implements SurfaceProjector
     public function supports(Operation $op): bool
     {
         return $op->supportsSurface('http');
+    }
+
+    /**
+     * Proyecta la operación a la ruta que HTTP expone. Devuelve un valor: no monta nada, no atiende
+     * nada, no consulta al contenedor.
+     *
+     * `routes()` sigue existiendo porque el kernel pide una tabla de rutas, y `handle()` porque
+     * alguien tiene que atender — pero las dos son materialización, y este método es el que faltaba
+     * para poder saber qué expone una operación sin montarla. Que ambas mitades sigan en la misma
+     * clase, con el enforcement de scope y permission dentro de `handle()`, es lo que P13.3 desata.
+     */
+    public function project(Operation $op): HttpRouteModel
+    {
+        return new HttpRouteModel(
+            method: $op->mutating ? HttpMethod::POST->value : HttpMethod::GET->value,
+            path: $this->pathFor($op),
+            name: $op->name,
+            scopes: $op->scopes,
+            permission: $op->permission,
+        );
+    }
+
+    /** La política de esta superficie — inyectada, o la de por defecto sobre el mismo contenedor. */
+    private function policy(): HttpOperationPolicy
+    {
+        return $this->policy ?? new HttpOperationPolicy($this->container);
     }
 
     /**
@@ -165,7 +194,7 @@ final class HttpProjector implements SurfaceProjector
         // Scope enforcement — the Artifact 09 hole closes. An operation with EMPTY scopes skips this
         // entirely and is byte-identical to the pre-auth path below.
         if ($op->scopes !== []) {
-            $denied = $this->enforceScopes($op, $request);
+            $denied = $this->policy()->enforceScopes($op, $request);
             if ($denied !== null) {
                 return $denied;
             }
@@ -174,7 +203,7 @@ final class HttpProjector implements SurfaceProjector
         // Permission enforcement — the permission-typed counterpart of the scope gate. Scope XOR
         // permission is guaranteed at Operation construction, so at most one of these branches runs.
         if ($op->permission !== null) {
-            $denied = $this->enforcePermission($op, $request);
+            $denied = $this->policy()->enforcePermission($op, $request);
             if ($denied !== null) {
                 return $denied;
             }
@@ -231,125 +260,6 @@ final class HttpProjector implements SurfaceProjector
         return $this->json($op->mutating ? 201 : 200, $data);
     }
 
-    /**
-     * Enforces `$op`'s declared scopes for one request. Returns `null` when the request is authorized
-     * (the caller proceeds to the confirm gate + handler), or a ready-to-send 401/403 JSON response
-     * when the milpa/auth scope gate denies it. Throws {@see AuthMiddlewareNotInstalledException}
-     * (500) — Rod's binding distinction — when the operation declares scopes but the host wired no
-     * auth chain to enforce them: a server misconfiguration, deliberately NOT a 401/403.
-     */
-    private function enforceScopes(Operation $op, ServerRequestInterface $request): ?ResponseInterface
-    {
-        if (!$this->authChainInstalled()) {
-            throw AuthMiddlewareNotInstalledException::forScopedOperation($op->name, $op->scopes);
-        }
-
-        // The fail-closed scope gate. RequireScopeMiddleware reads the AuthContext an upstream
-        // AuthenticateMiddleware/StartSession attached under 'milpa.auth' and throws the typed,
-        // learnable denial; the sentinel handler runs only when it admits the request.
-        $guard = new RequireScopeMiddleware(...$op->scopes);
-        try {
-            $guard->process($request, new class () implements RequestHandlerInterface {
-                public function handle(ServerRequestInterface $request): ResponseInterface
-                {
-                    return new Response(204);
-                }
-            });
-        } catch (AuthContextMissingException | ScopeDeniedException $e) {
-            return $this->json($e->statusCode(), ['error' => $e->getMessage(), 'code' => $e->errorCode()]);
-        }
-
-        // Authorized. The context stops lying: run the atom through the same policy layer MCP uses,
-        // with the honest ToolContext::web (real principal + real scopes). Opt-in — only when the
-        // agent-ready surface (milpa/tool-runtime) is installed.
-        return $this->enforceWebPolicy($op, $request);
-    }
-
-    /**
-     * Enforces `$op`'s declared permission for one request, mirroring {@see self::enforceScopes()}.
-     * Returns null when authorized, a ready 401/403 JSON response when the milpa/auth permission gate
-     * denies, and throws {@see AuthMiddlewareNotInstalledException} (500) when the operation declares a
-     * permission but the host wired no auth chain. The permission path runs the honest RequirePermission
-     * gate only — the scope-based tool-runtime PolicyGate is not applied here.
-     */
-    private function enforcePermission(Operation $op, ServerRequestInterface $request): ?ResponseInterface
-    {
-        if (!$this->authChainInstalled()) {
-            throw AuthMiddlewareNotInstalledException::forPermissionedOperation($op->name, (string) $op->permission);
-        }
-
-        $resolver = $this->container->has(PermissionResolver::class) ? $this->container->get(PermissionResolver::class) : null;
-        $contextFactory = $this->container->has(PermissionContextFactory::class) ? $this->container->get(PermissionContextFactory::class) : null;
-
-        $guard = new RequirePermissionMiddleware(
-            Permission::parse((string) $op->permission),
-            $resolver instanceof PermissionResolver ? $resolver : null,
-            $contextFactory instanceof PermissionContextFactory ? $contextFactory : null,
-        );
-
-        try {
-            $guard->process($request, new class () implements RequestHandlerInterface {
-                public function handle(ServerRequestInterface $request): ResponseInterface
-                {
-                    return new Response(204);
-                }
-            });
-        } catch (AuthContextMissingException | PermissionDeniedException $e) {
-            return $this->json($e->statusCode(), ['error' => $e->getMessage(), 'code' => $e->errorCode()]);
-        }
-
-        return null;
-    }
-
-    /**
-     * Whether the host wired an auth chain able to produce a verified {@see AuthContext} — i.e. a
-     * {@see CredentialVerifier} or {@see AuthContextFactory} is resolvable in the container. When
-     * neither is, a scope-declaring operation cannot be honestly enforced, which is a host
-     * configuration error (500), not a request failure.
-     */
-    private function authChainInstalled(): bool
-    {
-        return $this->container->has(CredentialVerifier::class)
-            || $this->container->has(AuthContextFactory::class);
-    }
-
-    /**
-     * Defense in depth for an already-authorized request: rebuilds the honest {@see ToolContext::web()}
-     * from the request's verified actor and runs the atom through the same {@see PolicyGate} that
-     * guards the MCP surface, so the HTTP atom is subject to the identical policy layer. Opt-in: a
-     * no-op (returns `null`) unless milpa/tool-runtime is installed. Returns a 403 JSON response if
-     * the gate denies, or `null` to proceed.
-     */
-    private function enforceWebPolicy(Operation $op, ServerRequestInterface $request): ?ResponseInterface
-    {
-        if (!class_exists(ToolContext::class) || !class_exists(PolicyGate::class)) {
-            return null;
-        }
-
-        $context = $request->getAttribute(AuthenticateMiddleware::ATTRIBUTE);
-        if (!$context instanceof AuthContext || $context->actor === null) {
-            return null; // unreachable once the scope gate above admitted the request; fail-safe
-        }
-
-        $decision = (new PolicyGate())->authorize(
-            ToolContext::web($context->actor->id, $context->actor->scopes),
-            new ToolDefinition(
-                name: $op->name,
-                description: $op->description,
-                inputSchema: $op->inputSchema ?? [],
-                callback: static fn (): null => null,
-                scopes: $op->scopes,
-                mutating: $op->mutating,
-                requiresConfirmation: $op->requiresConfirmation,
-            ),
-        );
-
-        if (!$decision->allowed) {
-            return $this->json(403, ['error' => $decision->reason, 'code' => 'MILPA_SCOPE_DENIED']);
-        }
-
-        return null;
-    }
 
     /**
      * Resolves the route path for an operation: an explicit `$op->path` is returned verbatim (the

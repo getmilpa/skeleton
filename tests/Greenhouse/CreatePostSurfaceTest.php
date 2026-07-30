@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace App\Tests\Greenhouse;
 
-use App\Command\CliProjector;
+use Milpa\Console\CliRunner;
 use App\Command\HttpProjector;
-use App\Command\McpProjector;
+use Milpa\Console\McpProjector;
 use Milpa\Auth\Actor;
 use Milpa\Auth\ActorType;
 use Milpa\Auth\AuthContext;
@@ -25,7 +25,7 @@ use PHPUnit\Framework\TestCase;
  */
 final class CreatePostSurfaceTest extends TestCase
 {
-    use \App\Tests\Support\SignsOperations;
+    use \Milpa\Console\Testing\SignsOperations;
 
     private function bootKernel(): Kernel
     {
@@ -40,7 +40,7 @@ final class CreatePostSurfaceTest extends TestCase
 
         // Consent on this surface is a signature now; the doubles keep that out of the way, since
         // what this test is about is the same handler answering on three surfaces.
-        $code = (new CliProjector(signer: $this->alwaysSigns(), authorizer: $this->acceptingAuthorizer()))->run(
+        $code = (new CliRunner(signer: $this->alwaysSigns(), authorizer: $this->acceptingAuthorizer()))->run(
             $op,
             ['--title=Hi', '--body=Yo', '--sign'],
             $kernel->container(),
@@ -71,7 +71,7 @@ final class CreatePostSurfaceTest extends TestCase
             }
         };
 
-        (new McpProjector())->project($kernel->commands(), $registry, $kernel->container());
+        (new McpProjector())->projectAll($kernel->commands(), $registry, $kernel->container());
 
         self::assertSame('create_post', $captured['name']);
         self::assertTrue($captured['options']->mutating);

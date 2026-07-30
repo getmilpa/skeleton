@@ -14,8 +14,8 @@ declare(strict_types=1);
 
 namespace App\Console;
 
-use App\Command\CliProjector;
-use App\Command\McpProjector;
+use Milpa\Console\CliRunner;
+use Milpa\Console\McpProjector;
 use Milpa\Attributes\PluginMetadata;
 use Milpa\Command\Operation;
 use Milpa\Container\DIContainer;
@@ -204,7 +204,7 @@ final class Application
         $agentReady = $registry instanceof ToolRegistry;
         $toolCount = 0;
         if ($agentReady) {
-            (new McpProjector())->project($kernel->commands(), $registry, $kernel->container());
+            (new McpProjector())->projectAll($kernel->commands(), $registry, $kernel->container());
             $toolCount = \count($registry->getToolSummaries());
         }
 
@@ -1077,7 +1077,7 @@ final class Application
             return 0;
         }
 
-        (new McpProjector())->project($kernel->commands(), $registry, $kernel->container());
+        (new McpProjector())->projectAll($kernel->commands(), $registry, $kernel->container());
 
         $summaries = $registry->getToolSummaries();
         if ($summaries === []) {
@@ -1206,7 +1206,7 @@ final class Application
     /** @param list<string> $args */
     private function invokeCommand(Operation $definition, array $args, Kernel $kernel): int
     {
-        return (new CliProjector())->run(
+        return (new CliRunner())->run(
             $definition,
             $args,
             $kernel->container(),

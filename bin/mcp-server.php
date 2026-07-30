@@ -73,7 +73,7 @@ if (!$registry instanceof ToolRegistry) {
     exit(1);
 }
 
-(new \App\Command\McpProjector())->project($kernel->commands(), $registry, $kernel->container());
+(new \Milpa\Console\McpProjector())->projectAll($kernel->commands(), $registry, $kernel->container());
 
 $service = new JsonRpcService($registry);
 
