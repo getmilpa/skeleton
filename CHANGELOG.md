@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.12.0](https://github.com/getmilpa/skeleton/compare/v0.11.1...v0.12.0) (2026-07-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* the surface projectors moved out of this template into `milpa/console`. An app generated from an earlier skeleton keeps its own copies and is unaffected; a new one consumes them as a versioned dependency.
+
+### Features
+
+* consume milpa/console, and ride the current family tree ([e045328](https://github.com/getmilpa/skeleton/commit/e0453283770d4f10829b681f5849ccd26e8dfce0))
+
 ## [0.11.1](https://github.com/getmilpa/skeleton/compare/v0.11.0...v0.11.1) (2026-07-30)
 
 
