@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.13.0](https://github.com/getmilpa/skeleton/compare/v0.12.0...v0.13.0) (2026-07-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* `coa`'s JSON output now carries an envelope — `{"ok": …, "result": …}` — instead of the bare handler result. Anything parsing it reads one level deeper.
+
+### Features
+
+* declare the CLI renderer, and require milpa/devtools ^0.9 ([686d736](https://github.com/getmilpa/skeleton/commit/686d736562a4a9ce7d9a02a9cee7c6918bd20174))
+
+
+### Bug Fixes
+
+* require milpa/console ^0.2, which is where the renderers live ([993c628](https://github.com/getmilpa/skeleton/commit/993c628a7a9681a0cbfc371d08e1531cdd776cfb))
+
 ## [0.12.0](https://github.com/getmilpa/skeleton/compare/v0.11.1...v0.12.0) (2026-07-30)
 
 
