@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/getmilpa/skeleton/compare/v0.11.0...v0.11.1) (2026-07-30)
+
+
+### Bug Fixes
+
+* catch up with the family's published versions ([32864d7](https://github.com/getmilpa/skeleton/commit/32864d736781b6fa4bdae9b9f4539362b9dd5a7d))
+
 ## [0.11.0](https://github.com/getmilpa/skeleton/compare/v0.10.0...v0.11.0) (2026-07-28)
 
 
