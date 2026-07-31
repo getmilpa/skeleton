@@ -1,6 +1,6 @@
 {
   "name": "milpa/skeleton",
-  "description": "The composer create-project starting point for a Milpa app: boots milpa/runtime's Kernel, serves a real HTTP response with zero database, and ships a coa CLI (doctor/validate/make/inspect, plus every plugin-declared CommandProviderInterface command) wired to milpa/devtools. Minimal by default \u2014 the agent-ready surface (MCP/tools, bin/mcp-server.php) is opt-in via `composer require milpa/mcp-server` or `php bin/coa agent:enable`.",
+  "description": "RETIRED \u2014 use milpa/framework. The former composer create-project starting point for a Milpa app.",
   "keywords": [
     "php",
     "milpa",
@@ -22,7 +22,7 @@
     "php": ">=8.3",
     "milpa/auth": "^0.3",
     "milpa/command": "^0.3",
-    "milpa/console": "^0.3",
+    "milpa/console": "^0.4",
     "milpa/container": "^0.1",
     "milpa/core": "^0.6",
     "milpa/data": "^0.2",
@@ -60,5 +60,6 @@
   ],
   "config": {
     "sort-packages": true
-  }
+  },
+  "abandoned": "milpa/framework"
 }

@@ -7,7 +7,38 @@
   </a>
 </p>
 
-# Milpa Skeleton
+# Milpa Skeleton — retired
+
+> **Use [`milpa/framework`](https://packagist.org/packages/milpa/framework) instead:**
+> `composer create-project milpa/framework myapp`
+>
+> ```bash
+> composer create-project milpa/framework myapp
+> ```
+
+This package is **abandoned**. It was the `composer create-project` starting point for a Milpa app,
+and `milpa/framework` is now that starting point — one entry point, not two.
+
+**Why it was retired.** Two create-project targets both saying *start here* is a second source of
+truth: they drift, and the one a newcomer lands on decides what they believe Milpa is.
+`milpa/framework` is the one that gets the work — it boots the same runtime, ships the same
+`coa` derived from declared operations, and adds the agent surface (`milpa/mcp-server`,
+`milpa/ai-gateway`) this package never had.
+
+**What you lose, and where it went.** Nothing that only lived here still only lives here. The HTTP
+projection of operations — this package's one unique capability — moved to
+[`milpa/console`](https://packagist.org/packages/milpa/console) 0.4.0, with its auth-backed policy in
+[`milpa/admin`](https://packagist.org/packages/milpa/admin) 0.4.0. What `milpa/framework` does not
+bring is `milpa/auth` and `milpa/data`; add them when your app needs them, which is the point of a
+floor you build up from.
+
+**Existing apps keep working.** An app created from this skeleton is your code, not this package —
+nothing installs it at runtime. It will not receive further releases.
+
+---
+
+<details>
+<summary>The original README, kept for whoever lands here from an old link</summary>
 
 > `composer create-project milpa/skeleton myapp` → an app that **runs** — booted, serving `/`,
 > answering `coa` — with zero database. This is your starting point, not a demo.
@@ -303,3 +334,5 @@ follows a standard code of conduct.
 ---
 
 Milpa is designed, built, and maintained by **[Rodrigo Vicente - TeamX Agency](https://teamx.agency/?utm_source=github&utm_medium=readme&utm_campaign=milpa&utm_content=skeleton)**.
+
+</details>
