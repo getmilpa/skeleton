@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.2](https://github.com/getmilpa/skeleton/compare/v0.13.1...v0.13.2) (2026-07-31)
+
+
+### Bug Fixes
+
+* require milpa/plugin ^0.5 and milpa/runtime ^0.7 ([f28ef6a](https://github.com/getmilpa/skeleton/commit/f28ef6a078cc29d6cfa73da76e1449be875ff741))
+
 ## [0.13.1](https://github.com/getmilpa/skeleton/compare/v0.13.0...v0.13.1) (2026-07-31)
 
 
