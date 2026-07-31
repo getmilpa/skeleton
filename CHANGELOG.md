@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.14.0](https://github.com/getmilpa/skeleton/compare/v0.13.2...v0.14.0) (2026-07-31)
+
+
+### ⚠ BREAKING CHANGES
+
+* retire this package — milpa/framework is the create-project entry point
+
+### Features
+
+* retire this package — milpa/framework is the create-project entry point ([0d60343](https://github.com/getmilpa/skeleton/commit/0d603435855036fc89f7528890019e0d78a0cb77))
+
 ## [0.13.2](https://github.com/getmilpa/skeleton/compare/v0.13.1...v0.13.2) (2026-07-31)
 
 
