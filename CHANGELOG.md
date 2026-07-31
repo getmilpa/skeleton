@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/getmilpa/skeleton/compare/v0.13.0...v0.13.1) (2026-07-31)
+
+
+### Bug Fixes
+
+* require milpa/console ^0.3 ([9689150](https://github.com/getmilpa/skeleton/commit/9689150ba40f14bf9c675a51d4039d51b76a3fba))
+
 ## [0.13.0](https://github.com/getmilpa/skeleton/compare/v0.12.0...v0.13.0) (2026-07-30)
 
 
